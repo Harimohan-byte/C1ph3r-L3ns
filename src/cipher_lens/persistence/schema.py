@@ -72,7 +72,10 @@ CREATE TABLE IF NOT EXISTS approvals (
     decision_actor TEXT,
     decision_rationale TEXT,
     decided_at TEXT,
-    expires_at TEXT
+    expires_at TEXT,
+    finding_id TEXT,
+    requested_by TEXT,
+    requested_rationale TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -102,6 +105,9 @@ def initialize(connection: sqlite3.Connection) -> None:
         ("scheme", "TEXT"),
         ("decision_actor", "TEXT"),
         ("expires_at", "TEXT"),
+        ("finding_id", "TEXT"),
+        ("requested_by", "TEXT"),
+        ("requested_rationale", "TEXT"),
     ):
         if name not in existing:
             connection.execute(f"ALTER TABLE approvals ADD COLUMN {name} {declaration}")

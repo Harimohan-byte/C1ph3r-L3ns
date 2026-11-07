@@ -364,3 +364,4 @@ def test_ingest_and_store_findings_persists_to_repository_and_audits(tmp_path: P
     assert ingest_event.detail["raw_count"] == 2
     assert ingest_event.detail["correlated_count"] == 1
     assert ingest_event.detail["duplicate_count"] == 1
+

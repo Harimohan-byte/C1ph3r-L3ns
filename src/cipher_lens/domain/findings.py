@@ -73,3 +73,4 @@ class NormalizedFinding(BaseModel):
     priority_score: float = Field(default=0.0, ge=0.0, le=10.0)
     provenance: list[FindingProvenance] = Field(default_factory=list)
     scan_run_id: str | None = None
+

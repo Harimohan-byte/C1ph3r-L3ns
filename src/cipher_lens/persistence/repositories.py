@@ -52,6 +52,9 @@ class ApprovalSummary:
     decision_rationale: str | None
     decided_at: str | None
     expires_at: str | None
+    finding_id: str | None = None
+    requested_by: str | None = None
+    requested_rationale: str | None = None
 
 
 class Repository:
@@ -197,25 +200,112 @@ class Repository:
             for row in rows
         ]
 
-    def list_approvals(self, scope_id: str | None = None) -> list[ApprovalSummary]:
+    def list_approvals(
+        self, scope_id: str | None = None, status: str | None = None
+    ) -> list[ApprovalSummary]:
         """Read durable approval decisions for display without exposing mutation from the UI."""
         query = "SELECT * FROM approvals"
-        parameters: tuple[str, ...] = ()
+        conditions: list[str] = []
+        parameters: list[str] = []
         if scope_id is not None:
-            query += " WHERE scope_id = ?"
-            parameters = (scope_id,)
-        query += " ORDER BY decided_at DESC, id DESC"
+            conditions.append("scope_id = ?")
+            parameters.append(scope_id)
+        if status is not None:
+            conditions.append("status = ?")
+            parameters.append(status)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY COALESCE(decided_at, id) DESC, id DESC"
         with self.connection() as connection:
-            rows = connection.execute(query, parameters).fetchall()
-        return [
-            ApprovalSummary(
-                id=row["id"], scope_id=row["scope_id"], target=row["target"], port=row["port"],
-                scheme=row["scheme"], action=row["action"], status=row["status"],
-                decision_actor=row["decision_actor"], decision_rationale=row["decision_rationale"],
-                decided_at=row["decided_at"], expires_at=row["expires_at"],
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        results: list[ApprovalSummary] = []
+        for row in rows:
+            keys = row.keys()
+            results.append(
+                ApprovalSummary(
+                    id=row["id"],
+                    scope_id=row["scope_id"],
+                    target=row["target"],
+                    port=row["port"],
+                    scheme=row["scheme"],
+                    action=row["action"],
+                    status=row["status"],
+                    decision_actor=row["decision_actor"],
+                    decision_rationale=row["decision_rationale"],
+                    decided_at=row["decided_at"],
+                    expires_at=row["expires_at"],
+                    finding_id=row["finding_id"] if "finding_id" in keys else None,
+                    requested_by=row["requested_by"] if "requested_by" in keys else None,
+                    requested_rationale=row["requested_rationale"] if "requested_rationale" in keys else None,
+                )
             )
-            for row in rows
-        ]
+        return results
+
+    def get_approval(self, approval_id: str) -> ApprovalSummary | None:
+        """Fetch a single approval record by its unique identifier."""
+        with self.connection() as connection:
+            row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if row is None:
+            return None
+        keys = row.keys()
+        return ApprovalSummary(
+            id=row["id"],
+            scope_id=row["scope_id"],
+            target=row["target"],
+            port=row["port"],
+            scheme=row["scheme"],
+            action=row["action"],
+            status=row["status"],
+            decision_actor=row["decision_actor"],
+            decision_rationale=row["decision_rationale"],
+            decided_at=row["decided_at"],
+            expires_at=row["expires_at"],
+            finding_id=row["finding_id"] if "finding_id" in keys else None,
+            requested_by=row["requested_by"] if "requested_by" in keys else None,
+            requested_rationale=row["requested_rationale"] if "requested_rationale" in keys else None,
+        )
+
+    def create_approval_request(
+        self,
+        approval_id: str,
+        scope_id: str,
+        target: str,
+        port: int,
+        scheme: str | None,
+        action: str,
+        status: str,
+        requested_by: str,
+        requested_rationale: str,
+        finding_id: str | None = None,
+    ) -> None:
+        """Persist a new pending approval request awaiting human decision."""
+        with self.connection() as connection:
+            connection.execute(
+                """INSERT INTO approvals (id, scope_id, target, port, scheme, action, status,
+                   requested_by, requested_rationale, finding_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (approval_id, scope_id, target, port, scheme, action, status,
+                 requested_by, requested_rationale, finding_id),
+            )
+
+    def update_approval_decision(
+        self,
+        approval_id: str,
+        status: str,
+        actor: str,
+        rationale: str,
+        expires_at: datetime | None = None,
+    ) -> None:
+        """Update an existing approval with an auditable terminal decision."""
+        with self.connection() as connection:
+            connection.execute(
+                """UPDATE approvals
+                   SET status = ?, decision_actor = ?, decision_rationale = ?,
+                       decided_at = datetime('now'),
+                       expires_at = ?
+                   WHERE id = ?""",
+                (status, actor, rationale, expires_at.isoformat() if expires_at else None, approval_id),
+            )
 
     def save_adapter_approval(
         self, approval_id: str, scope_id: str, target: str, port: int, scheme: str | None,
