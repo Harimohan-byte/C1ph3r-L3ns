@@ -23,7 +23,10 @@ class NiktoAdapter(ToolAdapter):
         self.require_startable(context, validated)
         request = validated.request
         run_id = str(uuid4())
-        context.repository.create_scan_run(run_id, context.scope.id, self.tool_name, request.profile, "queued")
+        context.repository.create_scan_run(
+            run_id, context.scope.id, self.tool_name, request.profile, "queued", request.rationale,
+            [step.model_dump() for step in request.anticipated_next_steps],
+        )
         executable = shutil.which("nikto")
         if executable is None:
             return self._fail(context, run_id, "Nikto is unavailable on PATH.")

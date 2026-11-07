@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +12,40 @@ from typing import Iterator
 
 from cipher_lens.domain.models import AuditEvent, ScopeRecord, ScopeRegistration
 from cipher_lens.persistence.schema import initialize
+
+
+@dataclass(frozen=True)
+class ScanRunSummary:
+    """Read-only projection for the analyst status workspace."""
+
+    id: str
+    scope_id: str
+    target: str
+    tool: str
+    profile: str | None
+    status: str
+    rationale: str | None
+    anticipated_next_steps: list[dict[str, str]]
+    started_at: str | None
+    completed_at: str | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class ApprovalSummary:
+    """Read-only approval projection; decisions remain owned by a later workflow."""
+
+    id: str
+    scope_id: str | None
+    target: str | None
+    port: int | None
+    scheme: str | None
+    action: str
+    status: str
+    decision_actor: str | None
+    decision_rationale: str | None
+    decided_at: str | None
+    expires_at: str | None
 
 
 class Repository:
@@ -115,11 +150,15 @@ class Repository:
                 ),
             )
 
-    def create_scan_run(self, run_id: str, scope_id: str, tool: str, profile: str, status: str) -> None:
+    def create_scan_run(
+        self, run_id: str, scope_id: str, tool: str, profile: str, status: str,
+        rationale: str | None = None, anticipated_next_steps: list[dict[str, str]] | None = None,
+    ) -> None:
         with self.connection() as connection:
             connection.execute(
-                "INSERT INTO scan_runs (id, scope_id, tool, profile, status, started_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
-                (run_id, scope_id, tool, profile, status),
+                """INSERT INTO scan_runs (id, scope_id, tool, profile, status, rationale, anticipated_next_steps, started_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (run_id, scope_id, tool, profile, status, rationale, json.dumps(anticipated_next_steps or [])),
             )
 
     def update_scan_run(self, run_id: str, status: str, error_message: str | None = None) -> None:
@@ -128,6 +167,49 @@ class Repository:
                 "UPDATE scan_runs SET status = ?, error_message = ?, completed_at = CASE WHEN ? IN ('done', 'failed', 'blocked') THEN datetime('now') ELSE completed_at END WHERE id = ?",
                 (status, error_message, status, run_id),
             )
+
+    def list_scan_runs(self, scope_id: str | None = None) -> list[ScanRunSummary]:
+        """Read persisted run state for the status UI; this method never changes a run."""
+        query = """
+            SELECT scan_runs.*, scopes.canonical_target AS target
+            FROM scan_runs JOIN scopes ON scopes.id = scan_runs.scope_id
+        """
+        parameters: tuple[str, ...] = ()
+        if scope_id is not None:
+            query += " WHERE scan_runs.scope_id = ?"
+            parameters = (scope_id,)
+        query += " ORDER BY scan_runs.started_at DESC, scan_runs.id DESC"
+        with self.connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [
+            ScanRunSummary(
+                id=row["id"], scope_id=row["scope_id"], target=row["target"], tool=row["tool"],
+                profile=row["profile"], status=row["status"], rationale=row["rationale"],
+                anticipated_next_steps=json.loads(row["anticipated_next_steps"] or "[]"),
+                started_at=row["started_at"], completed_at=row["completed_at"], error_message=row["error_message"],
+            )
+            for row in rows
+        ]
+
+    def list_approvals(self, scope_id: str | None = None) -> list[ApprovalSummary]:
+        """Read durable approval decisions for display without exposing mutation from the UI."""
+        query = "SELECT * FROM approvals"
+        parameters: tuple[str, ...] = ()
+        if scope_id is not None:
+            query += " WHERE scope_id = ?"
+            parameters = (scope_id,)
+        query += " ORDER BY decided_at DESC, id DESC"
+        with self.connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [
+            ApprovalSummary(
+                id=row["id"], scope_id=row["scope_id"], target=row["target"], port=row["port"],
+                scheme=row["scheme"], action=row["action"], status=row["status"],
+                decision_actor=row["decision_actor"], decision_rationale=row["decision_rationale"],
+                decided_at=row["decided_at"], expires_at=row["expires_at"],
+            )
+            for row in rows
+        ]
 
     def save_adapter_approval(
         self, approval_id: str, scope_id: str, target: str, port: int, scheme: str | None,

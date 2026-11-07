@@ -29,17 +29,25 @@ def context(tmp_path: Path, *, approval_id: str | None = None) -> AdapterContext
 def test_nmap_unavailable_is_audited_after_successful_validation(tmp_path: Path):
     adapter = NmapAdapter()
     current = context(tmp_path)
-    validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon"))
+    validated = adapter.validate(current, AdapterRequest(
+        target="lab.example", port=80, profile="quick_recon", rationale="Check the approved web service.",
+        anticipated_next_steps=[{
+            "tool": "nmap", "profile": "service_version_scan", "rationale": "Inspect an observed service."
+        }],
+    ))
     handle = adapter.start(current, validated)
     assert handle.status == ScanRunStatus.FAILED
     assert "unavailable" in handle.reason.lower()
     assert PROFILE_FLAGS["targeted_port_scan"] == ("-sT", "-sV", "--reason", "-n", "-Pn", "--open", "-T3")
+    saved = current.repository.list_scan_runs(current.scope.id)
+    assert saved[0].rationale == "Check the approved web service."
+    assert saved[0].anticipated_next_steps[0]["profile"] == "service_version_scan"
 
 
 def test_nikto_unavailable_is_explicit(tmp_path: Path):
     adapter = NiktoAdapter()
     current = context(tmp_path)
-    validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon"))
+    validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon", rationale="Check the web service."))
     handle = adapter.start(current, validated)
     assert handle.status == ScanRunStatus.FAILED
     assert "unavailable" in handle.reason.lower()
@@ -50,7 +58,7 @@ def test_every_adapter_blocks_active_validation_without_recorded_approval(tmp_pa
     current = context(tmp_path)
     result = adapter.validate(
         current,
-        AdapterRequest(target="lab.example", port=80, profile="quick_recon", scheme="http", action=ActionClass.ACTIVE_VALIDATION),
+        AdapterRequest(target="lab.example", port=80, profile="quick_recon", scheme="http", action=ActionClass.ACTIVE_VALIDATION, rationale="Validate the approved service."),
     )
     assert result.status == ScanRunStatus.AWAITING_APPROVAL
 
@@ -67,6 +75,7 @@ def test_zap_active_request_waits_for_approval_before_daemon_access(tmp_path: Pa
             profile="quick_recon",
             scheme="http",
             action=ActionClass.ACTIVE_VALIDATION,
+            rationale="Validate the approved service.",
         ),
     )
     assert result.status == ScanRunStatus.AWAITING_APPROVAL
@@ -79,7 +88,7 @@ def test_zap_unreachable_daemon_fails_explicitly_after_recon_validation(tmp_path
 
     adapter = ZapAdapter(base_url="http://127.0.0.1:8080", opener=unreachable)
     current = context(tmp_path)
-    validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon", scheme="http"))
+    validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon", scheme="http", rationale="Inspect the web service."))
     handle = adapter.start(current, validated)
     assert handle.status == ScanRunStatus.FAILED
     assert "unavailable" in handle.reason.lower()
@@ -96,7 +105,7 @@ def test_active_adapter_requires_a_matching_persisted_approval(tmp_path: Path):
     )
     result = NmapAdapter().validate(
         approved_context,
-        AdapterRequest(target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION),
+        AdapterRequest(target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION, rationale="Validate the approved service."),
     )
     assert result.status == ScanRunStatus.QUEUED
 
@@ -110,7 +119,7 @@ def test_active_adapter_rejects_a_rejected_or_expired_approval(tmp_path: Path):
     rejected_context = AdapterContext(
         current.repository, current.scope, current.artifact_directory, current.rate_limiter, rejected
     )
-    request = AdapterRequest(target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION)
+    request = AdapterRequest(target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION, rationale="Validate the approved service.")
     assert NmapAdapter().validate(rejected_context, request).status == ScanRunStatus.BLOCKED
 
     expired = "expired-approval"
@@ -127,7 +136,7 @@ def test_active_adapter_rejects_a_rejected_or_expired_approval(tmp_path: Path):
 def test_zap_requires_explicit_scheme(tmp_path: Path):
     current = context(tmp_path)
     result = ZapAdapter(base_url="http://127.0.0.1:8080").validate(
-        current, AdapterRequest(target="lab.example", port=80, profile="quick_recon")
+        current, AdapterRequest(target="lab.example", port=80, profile="quick_recon", rationale="Inspect the service.")
     )
     assert result.status == ScanRunStatus.BLOCKED
     assert "scheme" in result.reason.lower()
@@ -159,7 +168,7 @@ def test_zap_uses_the_explicit_https_scheme_after_matching_approval(tmp_path: Pa
     )
     adapter = ZapAdapter(base_url="http://127.0.0.1:8080", opener=opener)
     validated = adapter.validate(approved_context, AdapterRequest(
-        target="lab.example", port=80, profile="quick_recon", scheme="https", action=ActionClass.ACTIVE_VALIDATION,
+        target="lab.example", port=80, profile="quick_recon", scheme="https", action=ActionClass.ACTIVE_VALIDATION, rationale="Validate the approved web service.",
     ))
     handle = adapter.start(approved_context, validated)
     assert handle.status == ScanRunStatus.RUNNING

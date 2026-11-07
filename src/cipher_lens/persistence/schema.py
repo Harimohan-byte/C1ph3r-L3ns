@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     profile TEXT,
     status TEXT NOT NULL,
     rationale TEXT,
+    anticipated_next_steps TEXT NOT NULL DEFAULT '[]',
     started_at TEXT,
     completed_at TEXT,
     error_message TEXT
@@ -101,4 +102,7 @@ def initialize(connection: sqlite3.Connection) -> None:
     ):
         if name not in existing:
             connection.execute(f"ALTER TABLE approvals ADD COLUMN {name} {declaration}")
+    scan_run_columns = {row[1] for row in connection.execute("PRAGMA table_info(scan_runs)")}
+    if "anticipated_next_steps" not in scan_run_columns:
+        connection.execute("ALTER TABLE scan_runs ADD COLUMN anticipated_next_steps TEXT NOT NULL DEFAULT '[]'")
     connection.commit()

@@ -32,7 +32,10 @@ class NmapAdapter(ToolAdapter):
         self.require_startable(context, validated)
         request = validated.request
         run_id = str(uuid4())
-        context.repository.create_scan_run(run_id, context.scope.id, self.tool_name, request.profile, "queued")
+        context.repository.create_scan_run(
+            run_id, context.scope.id, self.tool_name, request.profile, "queued", request.rationale,
+            [step.model_dump() for step in request.anticipated_next_steps],
+        )
         if request.profile == "os_detection" and not self._has_os_detection_privilege():
             return self._fail_unavailable(context, run_id, "Nmap OS detection requires elevated local privileges.")
         executable = shutil.which("nmap")

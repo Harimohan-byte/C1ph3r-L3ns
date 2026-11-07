@@ -64,7 +64,7 @@ def adapter_context(tmp_path: Path, *, excluded_ports: str = "", approval_id: st
 def test_validate_scope_then_rate_and_never_starts_blocked_request(tmp_path: Path):
     repository, context = adapter_context(tmp_path, excluded_ports="80")
     adapter = FakeAdapter()
-    result = adapter.validate(context, AdapterRequest(target="lab.example", port=80, profile="quick_recon"))
+    result = adapter.validate(context, AdapterRequest(target="lab.example", port=80, profile="quick_recon", rationale="Check the approved service."))
     assert result.status == ScanRunStatus.BLOCKED
     assert adapter.started == 0
     events = repository.list_audit_events()
@@ -76,7 +76,7 @@ def test_validate_audits_rate_and_waits_for_active_approval(tmp_path: Path):
     repository, context = adapter_context(tmp_path)
     adapter = FakeAdapter()
     request = AdapterRequest(
-        target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION
+        target="lab.example", port=80, profile="quick_recon", action=ActionClass.ACTIVE_VALIDATION, rationale="Validate the approved service."
     )
     result = adapter.validate(context, request)
     assert result.status == ScanRunStatus.AWAITING_APPROVAL
@@ -101,7 +101,7 @@ def test_parse_helper_persists_hashed_raw_artifact(tmp_path: Path):
 def test_start_rejects_a_fabricated_or_replayed_validation_result(tmp_path: Path):
     _, context = adapter_context(tmp_path)
     adapter = FakeAdapter()
-    request = AdapterRequest(target="lab.example", port=80, profile="quick_recon")
+    request = AdapterRequest(target="lab.example", port=80, profile="quick_recon", rationale="Check the approved service.")
     with pytest.raises(ValueError, match="queued validation"):
         adapter.require_startable(context, ValidationResult(ScanRunStatus.QUEUED, "fake", request))
     valid = adapter.validate(context, request)

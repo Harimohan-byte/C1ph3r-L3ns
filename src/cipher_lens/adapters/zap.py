@@ -41,7 +41,10 @@ class ZapAdapter(ToolAdapter):
         self.require_startable(context, validated)
         request = validated.request
         run_id = str(uuid4())
-        context.repository.create_scan_run(run_id, context.scope.id, self.tool_name, request.profile, "queued")
+        context.repository.create_scan_run(
+            run_id, context.scope.id, self.tool_name, request.profile, "queued", request.rationale,
+            [step.model_dump() for step in request.anticipated_next_steps],
+        )
         if not self._available():
             return self._fail(context, run_id, f"ZAP is unavailable at {self.base_url}.")
         target_url = f"{request.scheme}://{request.target}:{request.port}"

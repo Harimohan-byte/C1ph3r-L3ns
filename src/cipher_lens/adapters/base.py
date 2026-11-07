@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
-from cipher_lens.domain.models import ActionClass, ScopeRecord
+from cipher_lens.domain.models import ActionClass, AnticipatedNextStep, ScopeRecord
 from cipher_lens.domain.scope import is_in_scope, normalize_target
 from cipher_lens.domain.validation import ValidationError, parse_ports, validate_target
 from cipher_lens.persistence.repositories import Repository
@@ -66,6 +66,8 @@ class AdapterRequest(BaseModel):
     profile: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     action: ActionClass = ActionClass.RECON
     scheme: Literal["http", "https"] | None = None
+    rationale: str = Field(min_length=1, max_length=1_000)
+    anticipated_next_steps: list[AnticipatedNextStep] = Field(default_factory=list, max_length=3)
     timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=1, le=3_600)
     poll_interval_seconds: int = Field(default=DEFAULT_POLL_INTERVAL_SECONDS, ge=1, le=60)
 
