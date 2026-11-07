@@ -251,3 +251,4 @@ def render(repository: Repository) -> None:
                 if event.detail:
                     with st.expander(f"Audit details ({event.event_type})", expanded=False):
                         st.json(event.detail)
+
