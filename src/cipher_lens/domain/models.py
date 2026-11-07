@@ -11,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import StrictInt, field_validator
 
 from cipher_lens.domain.validation import validate_target
+from cipher_lens.domain.findings import (
+    FindingProvenance,
+    NormalizedFinding,
+    Severity,
+    SEVERITY_ORDER,
+    SEVERITY_WEIGHTS,
+    ValidationStatus,
+)
 
 
 class ActionClass(StrEnum):

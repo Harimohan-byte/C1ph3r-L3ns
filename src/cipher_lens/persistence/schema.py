@@ -48,13 +48,16 @@ CREATE TABLE IF NOT EXISTS findings (
     scan_run_id TEXT REFERENCES scan_runs(id),
     source_tool TEXT NOT NULL,
     affected_asset TEXT NOT NULL,
+    canonical_title TEXT,
     description TEXT,
     severity TEXT,
     cvss REAL,
     cve TEXT,
     cwe TEXT,
     confidence TEXT,
-    validation_status TEXT NOT NULL DEFAULT 'suspected'
+    validation_status TEXT NOT NULL DEFAULT 'suspected',
+    priority REAL,
+    provenance_json TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS approvals (
@@ -105,4 +108,12 @@ def initialize(connection: sqlite3.Connection) -> None:
     scan_run_columns = {row[1] for row in connection.execute("PRAGMA table_info(scan_runs)")}
     if "anticipated_next_steps" not in scan_run_columns:
         connection.execute("ALTER TABLE scan_runs ADD COLUMN anticipated_next_steps TEXT NOT NULL DEFAULT '[]'")
+    findings_columns = {row[1] for row in connection.execute("PRAGMA table_info(findings)")}
+    for name, declaration in (
+        ("canonical_title", "TEXT"),
+        ("priority", "REAL"),
+        ("provenance_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ):
+        if name not in findings_columns:
+            connection.execute(f"ALTER TABLE findings ADD COLUMN {name} {declaration}")
     connection.commit()

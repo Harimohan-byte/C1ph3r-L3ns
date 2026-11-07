@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Iterator
 
 from cipher_lens.domain.models import AuditEvent, ScopeRecord, ScopeRegistration
+from cipher_lens.domain.findings import (
+    FindingProvenance,
+    NormalizedFinding,
+    Severity,
+    ValidationStatus,
+)
 from cipher_lens.persistence.schema import initialize
 
 
@@ -258,3 +264,102 @@ class Repository:
             )
             for row in rows
         ]
+
+    def save_findings(self, findings: list[NormalizedFinding]) -> None:
+        """Persist normalized, correlated findings and their provenance."""
+        with self.connection() as connection:
+            for finding in findings:
+                tools = (
+                    ", ".join(sorted({p.source_tool for p in finding.provenance}))
+                    if finding.provenance
+                    else "unknown"
+                )
+                connection.execute(
+                    """
+                    INSERT INTO findings (
+                        id, scan_run_id, source_tool, affected_asset, canonical_title,
+                        description, severity, cvss, cve, cwe, confidence, validation_status,
+                        priority, provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        scan_run_id = excluded.scan_run_id,
+                        source_tool = excluded.source_tool,
+                        affected_asset = excluded.affected_asset,
+                        canonical_title = excluded.canonical_title,
+                        description = excluded.description,
+                        severity = excluded.severity,
+                        cvss = excluded.cvss,
+                        cve = excluded.cve,
+                        cwe = excluded.cwe,
+                        confidence = excluded.confidence,
+                        validation_status = excluded.validation_status,
+                        priority = excluded.priority,
+                        provenance_json = excluded.provenance_json
+                    """,
+                    (
+                        finding.id,
+                        finding.scan_run_id,
+                        tools,
+                        finding.affected_asset,
+                        finding.canonical_title,
+                        finding.description,
+                        finding.severity.value,
+                        finding.cvss,
+                        finding.cve,
+                        finding.cwe,
+                        finding.confidence,
+                        finding.validation_status.value,
+                        finding.priority_score,
+                        json.dumps([p.model_dump() for p in finding.provenance]),
+                    ),
+                )
+
+    def list_findings(
+        self, scan_run_id: str | None = None, scope_id: str | None = None
+    ) -> list[NormalizedFinding]:
+        """Read persisted normalized findings ordered by priority score descending."""
+        query = "SELECT findings.* FROM findings"
+        parameters: list[str] = []
+        if scan_run_id is not None:
+            query += " WHERE findings.scan_run_id = ?"
+            parameters.append(scan_run_id)
+        elif scope_id is not None:
+            query += " JOIN scan_runs ON scan_runs.id = findings.scan_run_id WHERE scan_runs.scope_id = ?"
+            parameters.append(scope_id)
+        query += " ORDER BY findings.priority DESC, findings.affected_asset ASC"
+
+        with self.connection() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+
+        results: list[NormalizedFinding] = []
+        for row in rows:
+            prov_raw = json.loads(row["provenance_json"] or "[]")
+            provenance = [FindingProvenance.model_validate(item) for item in prov_raw]
+            sev_val = row["severity"]
+            severity = (
+                Severity(sev_val) if sev_val in Severity._value2member_map_ else Severity.INFO
+            )
+            val_stat = row["validation_status"]
+            validation_status = (
+                ValidationStatus(val_stat)
+                if val_stat in ValidationStatus._value2member_map_
+                else ValidationStatus.SUSPECTED
+            )
+            results.append(
+                NormalizedFinding(
+                    id=row["id"],
+                    scan_run_id=row["scan_run_id"],
+                    canonical_title=row["canonical_title"] or "Security finding",
+                    affected_asset=row["affected_asset"],
+                    description=row["description"] or "",
+                    severity=severity,
+                    cvss=row["cvss"],
+                    cve=row["cve"],
+                    cwe=row["cwe"],
+                    confidence=row["confidence"] or "observed",
+                    validation_status=validation_status,
+                    priority_score=row["priority"] if row["priority"] is not None else 0.0,
+                    provenance=provenance,
+                )
+            )
+        return results
