@@ -23,7 +23,7 @@ def recovery_guidance(run: ScanRunSummary) -> str:
 
 def _run_card(run: ScanRunSummary) -> None:
     st.markdown(status_badge(run.status), unsafe_allow_html=True)
-    st.markdown(f"**{run.tool.upper()}** · {run.target}:{run.profile or 'default'}")
+    st.markdown(f"**{run.tool.upper()}** · {run.target} · {run.profile or 'default'}")
     st.caption(f"Started: {run.started_at or 'not recorded'} · Completed: {run.completed_at or 'not completed'}")
     st.write(run.rationale or "No rationale was persisted for this activity.")
     if run.anticipated_next_steps:

@@ -14,7 +14,9 @@ from cipher_lens.ui.scope_page import render as render_scope_page
 st.set_page_config(page_title="CIPHER LENS", page_icon="◈", layout="wide")
 apply_tokens()
 repository = Repository(database_path())
-workspace = st.sidebar.radio("Workspace", ("Authorized scope", "Assessment status"))
+if "workspace" not in st.session_state:
+    st.session_state.workspace = "Authorized scope"
+workspace = st.sidebar.radio("Workspace", ("Authorized scope", "Assessment status"), key="workspace")
 if workspace == "Authorized scope":
     render_scope_page(repository)
 else:
