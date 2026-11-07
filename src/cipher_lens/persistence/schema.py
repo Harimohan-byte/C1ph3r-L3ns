@@ -59,10 +59,16 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY,
     scan_run_id TEXT REFERENCES scan_runs(id),
+    scope_id TEXT REFERENCES scopes(id),
+    target TEXT,
+    port INTEGER,
+    scheme TEXT,
     action TEXT NOT NULL,
     status TEXT NOT NULL,
+    decision_actor TEXT,
     decision_rationale TEXT,
-    decided_at TEXT
+    decided_at TEXT,
+    expires_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -84,4 +90,15 @@ CREATE INDEX IF NOT EXISTS idx_findings_scan_run_id ON findings(scan_run_id);
 
 def initialize(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
+    existing = {row[1] for row in connection.execute("PRAGMA table_info(approvals)")}
+    for name, declaration in (
+        ("scope_id", "TEXT"),
+        ("target", "TEXT"),
+        ("port", "INTEGER"),
+        ("scheme", "TEXT"),
+        ("decision_actor", "TEXT"),
+        ("expires_at", "TEXT"),
+    ):
+        if name not in existing:
+            connection.execute(f"ALTER TABLE approvals ADD COLUMN {name} {declaration}")
     connection.commit()

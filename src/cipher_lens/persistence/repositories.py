@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -95,6 +96,68 @@ class Repository:
                     json.dumps(event.detail, sort_keys=True),
                 ),
             )
+
+    def save_evidence(self, artifact: object, scan_run_id: str | None) -> None:
+        """Persist the immutable artifact fields owned by the adapter contract."""
+        with self.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO evidence (id, scan_run_id, file_path, sha256, tool, captured_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    artifact.id,
+                    scan_run_id,
+                    str(artifact.file_path),
+                    artifact.sha256,
+                    artifact.tool,
+                    artifact.captured_at.isoformat(),
+                ),
+            )
+
+    def create_scan_run(self, run_id: str, scope_id: str, tool: str, profile: str, status: str) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "INSERT INTO scan_runs (id, scope_id, tool, profile, status, started_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (run_id, scope_id, tool, profile, status),
+            )
+
+    def update_scan_run(self, run_id: str, status: str, error_message: str | None = None) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE scan_runs SET status = ?, error_message = ?, completed_at = CASE WHEN ? IN ('done', 'failed', 'blocked') THEN datetime('now') ELSE completed_at END WHERE id = ?",
+                (status, error_message, status, run_id),
+            )
+
+    def save_adapter_approval(
+        self, approval_id: str, scope_id: str, target: str, port: int, scheme: str | None,
+        action: str, status: str, actor: str, rationale: str, expires_at: datetime,
+    ) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                """INSERT INTO approvals (id, scope_id, target, port, scheme, action, status,
+                   decision_actor, decision_rationale, decided_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (approval_id, scope_id, target, port, scheme, action, status, actor, rationale,
+                 datetime.now(timezone.utc).isoformat(), expires_at.isoformat()),
+            )
+
+    def verify_adapter_approval(
+        self, approval_id: str, scope_id: str, target: str, port: int, scheme: str | None, action: str
+    ) -> tuple[bool, str]:
+        with self.connection() as connection:
+            row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if row is None:
+            return False, "No recorded approval exists for this request."
+        if row["status"] != "approved":
+            return False, "The recorded approval is not approved."
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            return False, "The recorded approval has expired."
+        expected = (scope_id, target, port, scheme, action)
+        actual = (row["scope_id"], row["target"], row["port"], row["scheme"], row["action"])
+        if actual != expected:
+            return False, "The recorded approval does not match this exact request."
+        return True, "Recorded approval matches this request."
 
     def list_audit_events(self) -> list[AuditEvent]:
         from datetime import datetime

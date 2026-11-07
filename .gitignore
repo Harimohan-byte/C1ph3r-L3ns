@@ -11,6 +11,8 @@ build/
 .python-packages/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.test-run-tmp*/
 
 # Local analysis and generated artifacts
 graphify-out/

@@ -1,0 +1,112 @@
+"""Scoped Nmap XML adapter with fixed, non-injectable profile bundles."""
+from __future__ import annotations
+
+import shutil
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+from ctypes import windll
+from os import name as operating_system
+from pathlib import Path
+from uuid import uuid4
+
+from cipher_lens.adapters.base import AdapterContext, AdapterRequest, Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ToolAdapter, ValidationResult
+from cipher_lens.services.audit import record
+
+PROFILE_FLAGS: dict[str, tuple[str, ...]] = {
+    "quick_recon": ("-sT", "-n", "-Pn", "--open", "-T3"),
+    "service_version_scan": ("-sT", "-sV", "--version-light", "-n", "-Pn", "--open", "-T3"),
+    "targeted_port_scan": ("-sT", "-sV", "--reason", "-n", "-Pn", "--open", "-T3"),
+    "os_detection": ("-sT", "-O", "-n", "-Pn", "--open", "-T3"),
+}
+
+
+class NmapAdapter(ToolAdapter):
+    tool_name = "nmap"
+    allowed_profiles = frozenset(PROFILE_FLAGS)
+
+    def __init__(self) -> None:
+        self._runs: dict[str, tuple[subprocess.Popen[bytes], Path, float]] = {}
+
+    def start(self, context: AdapterContext, validated: ValidationResult) -> RunHandle:
+        self.require_startable(context, validated)
+        request = validated.request
+        run_id = str(uuid4())
+        context.repository.create_scan_run(run_id, context.scope.id, self.tool_name, request.profile, "queued")
+        if request.profile == "os_detection" and not self._has_os_detection_privilege():
+            return self._fail_unavailable(context, run_id, "Nmap OS detection requires elevated local privileges.")
+        executable = shutil.which("nmap")
+        if executable is None:
+            return self._fail_unavailable(context, run_id, "Nmap is unavailable on PATH.")
+        output_path = context.artifact_directory / self.tool_name / f"{run_id}.xml"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [executable, *PROFILE_FLAGS[request.profile], "-p", str(request.port), "-oX", str(output_path), request.target]
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+        except OSError as error:
+            return self._fail_unavailable(context, run_id, f"Nmap could not start: {error.__class__.__name__}.")
+        self._runs[run_id] = (process, output_path, time.monotonic() + request.timeout_seconds)
+        context.repository.update_scan_run(run_id, ScanRunStatus.RUNNING.value)
+        record(context.repository, event_type="adapter_start", outcome="running", entity_type="scan_run", entity_id=run_id,
+               detail={"tool": self.tool_name, "profile": request.profile, "target": request.target, "port": request.port})
+        return RunHandle(run_id, ScanRunStatus.RUNNING)
+
+    def poll(self, context: AdapterContext, handle: RunHandle) -> PollResult:
+        state = self._runs.get(handle.run_id)
+        if state is None:
+            return PollResult(handle.run_id, handle.status, handle.reason)
+        process, _, deadline = state
+        if process.poll() is None and time.monotonic() < deadline:
+            return PollResult(handle.run_id, ScanRunStatus.RUNNING)
+        if process.poll() is None:
+            process.kill()
+            return self._finish_failed(context, handle.run_id, "Nmap timed out.")
+        if process.returncode != 0:
+            return self._finish_failed(context, handle.run_id, "Nmap failed.")
+        context.repository.update_scan_run(handle.run_id, ScanRunStatus.PARSING.value)
+        return PollResult(handle.run_id, ScanRunStatus.PARSING)
+
+    def parse(self, context: AdapterContext, handle: RunHandle, raw_output: bytes) -> ParseResult:
+        evidence = self.persist_raw_artifact(context, handle.run_id, raw_output, ".xml")
+        try:
+            root = ET.fromstring(raw_output)
+        except ET.ParseError:
+            return self.parse_failure(context, handle, evidence, "Nmap returned malformed XML output.")
+        findings: list[Finding] = []
+        for host in root.findall("host"):
+            address_element = host.find("address")
+            address = address_element.get("addr") if address_element is not None else "unknown"
+            for port in host.findall(".//port"):
+                state = port.find("state")
+                if state is None or state.get("state") != "open":
+                    continue
+                reason = state.get("reason", "unspecified")
+                service = port.find("service")
+                service_name = service.get("name", "unknown") if service is not None else "unknown"
+                findings.append(Finding(source_tool=self.tool_name, affected_asset=f"{address}:{port.get('portid')}",
+                    description=f"Open {service_name} port observed; Nmap reason: {reason}.", confidence="observed", validation_status="not_validated"))
+        context.repository.update_scan_run(handle.run_id, ScanRunStatus.DONE.value)
+        record(context.repository, event_type="adapter_parse", outcome="done", entity_type="scan_run", entity_id=handle.run_id,
+               detail={"tool": self.tool_name, "finding_count": len(findings)})
+        return ParseResult(evidence=evidence, findings=findings)
+
+    def _fail_unavailable(self, context: AdapterContext, run_id: str, reason: str) -> RunHandle:
+        context.repository.update_scan_run(run_id, ScanRunStatus.FAILED.value, reason)
+        record(context.repository, event_type="adapter_start", outcome="failed", entity_type="scan_run", entity_id=run_id,
+               detail={"tool": self.tool_name, "reason": reason})
+        return RunHandle(run_id, ScanRunStatus.FAILED, reason)
+
+    def _finish_failed(self, context: AdapterContext, run_id: str, reason: str) -> PollResult:
+        context.repository.update_scan_run(run_id, ScanRunStatus.FAILED.value, reason)
+        record(context.repository, event_type="adapter_poll", outcome="failed", entity_type="scan_run", entity_id=run_id,
+               detail={"tool": self.tool_name, "reason": reason})
+        return PollResult(run_id, ScanRunStatus.FAILED, reason)
+
+    @staticmethod
+    def _has_os_detection_privilege() -> bool:
+        if operating_system != "nt":
+            return False
+        try:
+            return bool(windll.shell32.IsUserAnAdmin())
+        except (AttributeError, OSError):
+            return False
