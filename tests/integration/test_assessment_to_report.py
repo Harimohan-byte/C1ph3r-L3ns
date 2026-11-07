@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-import pytest
+# Ensure src/ root is present on sys.path for direct test execution and IDE language servers
+_src_root = str(Path(__file__).resolve().parents[2] / "src")
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from cipher_lens.adapters.base import EvidenceArtifact, Finding
-from cipher_lens.domain.findings import Severity, ValidationStatus
+from cipher_lens.domain.findings import Severity
 from cipher_lens.domain.models import ActionClass, PlanProposal, ScanProfile, ScopeRegistration, ToolName
 from cipher_lens.persistence.repositories import Repository
 from cipher_lens.services.approvals import (
@@ -80,13 +84,16 @@ def test_complete_assessment_to_report_lifecycle(tmp_path: Path):
         rationale=proposal.rationale,
     )
 
+    evidence_file = tmp_path / "nmap_output.xml"
+    evidence_file.write_text("<nmaprun></nmaprun>", encoding="utf-8")
     evidence = EvidenceArtifact(
         id=str(uuid4()),
-        file_path=tmp_path / "nmap_output.xml",
+        file_path=evidence_file,
         sha256="7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
         tool="nmap",
         captured_at=datetime.now(timezone.utc),
     )
+    repository.save_evidence(evidence, run_id)
 
     # Ingest raw findings with one duplicate signature to verify correlation
     raw_findings = [
@@ -197,3 +204,11 @@ def test_complete_assessment_to_report_lifecycle(tmp_path: Path):
             assert prov.sha256 == evidence.sha256
             assert prov.file_path == str(evidence.file_path)
             assert prov.source_tool in {"nmap", "zap", "nikto"}
+
+
+if __name__ == "__main__":
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_complete_assessment_to_report_lifecycle(Path(temp_dir))
+        print("Integration test passed successfully.")

@@ -1,4 +1,10 @@
+import sys
 from pathlib import Path
+
+# Ensure src/ root is present on sys.path for direct test execution and IDE language servers
+_src_root = str(Path(__file__).resolve().parents[2] / "src")
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from cipher_lens.domain.models import ActionClass, ScopeRegistration
 from cipher_lens.persistence.repositories import Repository

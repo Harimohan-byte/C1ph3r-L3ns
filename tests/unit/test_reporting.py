@@ -159,3 +159,4 @@ def test_report_context_severity_distribution(test_repo: Repository, populated_s
     assert len(context["findings"]) == 2
     assert len(context["runs"]) == 2
     assert len(context["approvals"]) == 1
+

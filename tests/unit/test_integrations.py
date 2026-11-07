@@ -129,3 +129,4 @@ def test_status_pill_helper():
     planned_pill = _status_pill(IntegrationStatus.PLANNED)
     assert "cl-status-awaiting-approval" in planned_pill
     assert "Planned" in planned_pill
+
