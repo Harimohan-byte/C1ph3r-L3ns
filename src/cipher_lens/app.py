@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure src/ root is present on sys.path for direct streamlit execution
+_src_root = str(Path(__file__).resolve().parent.parent)
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
+
 import streamlit as st
 
 from cipher_lens.config import database_path
