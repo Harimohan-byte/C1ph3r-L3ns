@@ -5,7 +5,29 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dotenv import dotenv_values, load_dotenv
+try:
+    from dotenv import dotenv_values, load_dotenv
+except ImportError:
+    def dotenv_values(dotenv_path: str | Path | None = None) -> dict[str, str]:
+        p = Path(dotenv_path) if dotenv_path else Path(".env")
+        if not p.is_file():
+            return {}
+        res = {}
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            res[k.strip()] = v.strip().strip("'\"")
+        return res
+
+    def load_dotenv(dotenv_path: str | Path | None = None, override: bool = False) -> bool:
+        values = dotenv_values(dotenv_path)
+        for k, v in values.items():
+            if override or k not in os.environ:
+                os.environ[k] = v
+        return bool(values)
+
 from pydantic import BaseModel
 
 
