@@ -308,3 +308,82 @@ def test_rate_limiter_allows_different_tools_sequentially(tmp_path: Path):
     # But call for Nikto on the same target and port passes immediately!
     d3 = limiter(scope, nikto_proposal, ActionClass.RECON)
     assert d3.allowed is True
+
+
+def test_planning_prompt_catalog_includes_all_seven_tools_with_correct_statuses(tmp_path: Path):
+    """Verify that the planning system prompt includes all 7 security tools and their truthful statuses."""
+    from cipher_lens.services.planning import _messages
+
+    _, context = scope_context(tmp_path)
+    messages = _messages(context)
+    system_prompt = next(m["content"] for m in messages if m["role"] == "system")
+
+    # All 7 tools must be named
+    assert "Nmap" in system_prompt
+    assert "OWASP ZAP" in system_prompt
+    assert "Nikto" in system_prompt
+    assert "Burp Suite Community" in system_prompt
+    assert "Nessus" in system_prompt
+    assert "OpenVAS / Greenbone" in system_prompt
+    assert "Metasploit" in system_prompt
+
+    # Real statuses must be accurately reflected
+    assert "Status: Live" in system_prompt
+    assert "Status: Import-only" in system_prompt
+    assert "Status: Planned" in system_prompt
+
+
+def test_llm_proposal_with_import_tool_in_rationale_is_valid(tmp_path: Path):
+    """LLM can mention Burp Suite in rationale/guidance while selecting a Live tool for execution."""
+    import json
+    repository, context = scope_context(tmp_path)
+    llm_output = json.dumps({
+        "tool": "nikto",
+        "profile": "web_quick",
+        "target": "lab.example",
+        "port": 80,
+        "rationale": "Burp Suite Community would help with manual intercept/repeater testing here, but it has no REST automation API in the free tier; run it manually and import the exported report via the Integration Matrix page.",
+        "anticipated_next_steps": [
+            {
+                "tool": "zap",
+                "profile": "active_scan",
+                "rationale": "Follow up with ZAP active scanning once initial web misconfigurations are cataloged."
+            }
+        ]
+    })
+    outcome = propose_and_gate(
+        repository,
+        context,
+        slots=[slot(1)],
+        client=StaticClient(llm_output),
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    assert outcome.status == ProposalStatus.APPROVED
+    assert outcome.source == "provider_1"
+    assert outcome.proposal.tool.value == "nikto"
+    assert "Burp Suite Community" in outcome.proposal.rationale
+
+
+def test_llm_proposal_with_import_tool_in_executable_tool_field_is_rejected(tmp_path: Path):
+    """If the LLM selects an Import-only or Planned tool as the executable tool, schema rejection occurs."""
+    import json
+    repository, context = scope_context(tmp_path)
+    # LLM erroneously puts burp_suite as the executable tool
+    invalid_llm_output = json.dumps({
+        "tool": "burp_suite",
+        "profile": "web_quick",
+        "target": "lab.example",
+        "port": 80,
+        "rationale": "Attempting automated scan with Burp Suite."
+    })
+    outcome = propose_and_gate(
+        repository,
+        context,
+        slots=[slot(1)],
+        client=StaticClient(invalid_llm_output),
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    # The provider fails schema validation and falls back to deterministic fallback
+    assert outcome.status == ProposalStatus.APPROVED
+    assert outcome.source == "deterministic_fallback"
+    assert outcome.proposal.tool.value in {"nmap", "nikto", "zap"}

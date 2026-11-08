@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
+from cipher_lens.config import zap_base_url
 from cipher_lens.domain.models import ActionClass, ScopeRecord
 from cipher_lens.persistence.repositories import ApprovalSummary, Repository
 from cipher_lens.services.approvals import (
@@ -48,6 +49,22 @@ def _render_approval_card(approval: ApprovalSummary, repository: Repository) -> 
 
     if is_pending:
         with st.expander(f"Review and decide: {asset}", expanded=False):
+            zap_url = zap_base_url()
+            st.markdown(
+                f"""
+                <div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.85rem;">
+                    <span style="color: #BBF351; font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.35rem;">
+                        ⚡ Pre-Approval Verification &amp; Site-Tree Warm-Up
+                    </span>
+                    <ol style="color: #D6DBC8; font-size: 0.82rem; margin: 0; padding-left: 1.2rem; line-height: 1.45;">
+                        <li><strong>Confirm ZAP Daemon:</strong> Verify that OWASP ZAP is running and reachable at <code>{html.escape(zap_url)}</code>.</li>
+                        <li><strong>Manual Proxy Warm-Up (Recommended):</strong> Before launching an active scan against a Single Page Application (like Juice Shop), proxy-browse the target through ZAP (e.g., register/login, search, and view items) so the active scan attacks real recorded API routes rather than just the static SPA shell.</li>
+                    </ol>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
             with st.form(f"decision-form-{approval.id}"):
                 actor = st.text_input("Reviewer name or identifier", placeholder="Analyst name")
                 rationale = st.text_area(

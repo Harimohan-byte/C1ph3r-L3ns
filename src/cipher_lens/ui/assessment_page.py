@@ -233,9 +233,16 @@ def _execute_and_collect_scan(
 
         # Status is PARSING — read raw output and parse findings
         if poll_res.status == ScanRunStatus.PARSING:
-            output_path: Path | None = None
+            candidates = [
+                context.artifact_directory / tool_name / f"{handle.run_id}.xml",
+                context.artifact_directory / tool_name / f"{handle.run_id}.json",
+                context.artifact_directory / f"{handle.run_id}.xml",
+                context.artifact_directory / f"{handle.run_id}.json",
+            ]
             if hasattr(adapter, "_runs") and handle.run_id in adapter._runs:
-                output_path = adapter._runs[handle.run_id][1]
+                candidates.insert(0, adapter._runs[handle.run_id][1])
+
+            output_path = next((p for p in candidates if p.exists() and p.stat().st_size > 0), None)
 
             if output_path and output_path.exists():
                 raw = output_path.read_bytes()
@@ -254,10 +261,10 @@ def _execute_and_collect_scan(
 
 
 # ---------------------------------------------------------------------------
-# Auto-recover orphaned running scans
+# Auto-recover and poll running scans across page reloads
 # ---------------------------------------------------------------------------
 def _recover_orphaned_scans(repository: Repository, scope_id: str) -> None:
-    """Recover any scans left in running state by a prior interrupted session."""
+    """Recover and poll any scans left in running or parsing state by prior actions."""
     runs = repository.list_scan_runs(scope_id)
     running_runs = [r for r in runs if r.status in {"running", "parsing"}]
     if not running_runs:
@@ -265,31 +272,53 @@ def _recover_orphaned_scans(repository: Repository, scope_id: str) -> None:
 
     adapters = _session_adapters()
     artifact_dir = data_directory() / "artifacts" / scope_id
+    scope = next((s for s in repository.list_scopes() if s.id == scope_id), None)
+    if not scope:
+        return
+
+    ctx = AdapterContext(
+        repository=repository,
+        scope=scope,
+        artifact_directory=artifact_dir,
+        rate_limiter=_session_rate_limiter(),
+    )
 
     for r in running_runs:
         adapter = adapters.get(r.tool)
-        output_file = artifact_dir / f"{r.id}.xml"
-        if not output_file.exists():
-            output_file = artifact_dir / f"{r.id}.json"
+        if not adapter:
+            continue
 
-        # If output file exists, attempt parsing
-        if output_file.exists() and output_file.stat().st_size > 0 and adapter:
-            try:
-                raw = output_file.read_bytes()
-                ctx = AdapterContext(
-                    repository=repository,
-                    scope=next(s for s in repository.list_scopes() if s.id == scope_id),
-                    artifact_directory=artifact_dir,
-                    rate_limiter=_session_rate_limiter(),
-                )
-                parse_result = adapter.parse(ctx, RunHandle(r.id, ScanRunStatus.PARSING), raw)
-                if parse_result.findings:
-                    ingest_and_store_findings(repository, r.id, parse_result.findings, parse_result.evidence)
-            except Exception:
-                repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Could not parse artifact.")
-        else:
-            # Mark as failed so it does not hang forever in running status
-            repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Scan process was interrupted by page reload.")
+        handle = RunHandle(r.id, ScanRunStatus(r.status))
+        poll_res = adapter.poll(ctx, handle)
+
+        # 1. If actively executing in background, preserve running state!
+        if poll_res.status == ScanRunStatus.RUNNING:
+            continue
+
+        # 2. If finished and ready for parsing:
+        if poll_res.status == ScanRunStatus.PARSING:
+            candidates = [
+                artifact_dir / r.tool / f"{r.id}.xml",
+                artifact_dir / r.tool / f"{r.id}.json",
+                artifact_dir / f"{r.id}.xml",
+                artifact_dir / f"{r.id}.json",
+            ]
+            output_file = next((f for f in candidates if f.exists() and f.stat().st_size > 0), None)
+            if output_file:
+                try:
+                    raw = output_file.read_bytes()
+                    parse_result = adapter.parse(ctx, handle, raw)
+                    if parse_result.findings:
+                        ingest_and_store_findings(repository, r.id, parse_result.findings, parse_result.evidence)
+                    repository.update_scan_run(r.id, ScanRunStatus.DONE.value)
+                except Exception as exc:
+                    repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, f"Could not parse artifact: {exc}")
+            else:
+                repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Process completed but output artifact is missing.")
+
+        # 3. If failed during poll:
+        elif poll_res.status == ScanRunStatus.FAILED:
+            repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, poll_res.reason or "Scan process terminated.")
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +372,16 @@ def render(repository: Repository) -> None:
 
     # Recover any orphaned scans from previous reloads
     _recover_orphaned_scans(repository, selected.id)
+
+    # Display active background scans banner if any
+    active_runs = [r for r in repository.list_scan_runs(selected.id) if r.status in {"running", "parsing"}]
+    if active_runs:
+        for ar in active_runs:
+            st.info(
+                f"⏳ **{ar.tool.upper()} scan ({ar.profile}) is executing in the background.** "
+                f"Navigating or reloading will not interrupt it; findings will correlate automatically once finished.",
+                icon="ℹ️",
+            )
 
     # -------------------------------------------------------------------
     # Section 1: AI Planner

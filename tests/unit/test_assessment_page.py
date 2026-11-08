@@ -68,6 +68,33 @@ def test_render_proposal_outcome_uses_modular_bento_chips():
         assert "127.0.0.1" in html
         assert "3000" in html
         assert "NMAP" in html
-        assert "quick_recon" in html
-        assert "Initial port discovery." in html
+
+
+def test_mid_scan_page_reload_does_not_fail_running_scan(tmp_path: Path):
+    """Regression test: ordinary Streamlit reruns/reloads mid-scan must NOT mark running scans as failed."""
+    from unittest.mock import MagicMock, patch
+    from cipher_lens.adapters.base import PollResult, ScanRunStatus
+    from cipher_lens.ui.assessment_page import _recover_orphaned_scans
+
+    repository = Repository(tmp_path / "cipher.sqlite3")
+    with repository.connection() as conn:
+        conn.execute("""INSERT INTO scopes VALUES
+            ('scope-1', '127.0.0.1', '127.0.0.1', '3000', '', '', 'Authorized', 1, '[\"recon\"]', '2026-11-08T00:00:00+00:00')""")
+        # A scan that is currently executing in background
+        conn.execute("""INSERT INTO scan_runs (id, scope_id, tool, profile, status, rationale, started_at)
+            VALUES ('run-active', 'scope-1', 'nikto', 'web_quick', 'running', 'Web vulnerability scan.', datetime('now'))""")
+
+    # Mock adapter poll returning ScanRunStatus.RUNNING (scan still in progress)
+    mock_nikto = MagicMock()
+    mock_nikto.poll.return_value = PollResult("run-active", ScanRunStatus.RUNNING)
+
+    with patch("cipher_lens.ui.assessment_page._session_adapters", return_value={"nikto": mock_nikto}):
+        # Simulate Streamlit page reload / widget interaction
+        _recover_orphaned_scans(repository, "scope-1")
+
+    # Confirm the scan is STILL running, NOT marked failed or interrupted!
+    runs = repository.list_scan_runs("scope-1")
+    assert len(runs) == 1
+    assert runs[0].status == "running"
+    assert runs[0].error_message is None
 

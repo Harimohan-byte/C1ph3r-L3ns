@@ -164,16 +164,45 @@ def _clean_json_content(raw: str) -> str:
     return text
 
 
+def _seven_tools_prompt_catalog() -> str:
+    """Format all 7 security tools with their declared capability and integration statuses."""
+    catalog = [
+        ("Nmap", "Live", "Host, port, and service discovery, reconnaissance, and version enumeration", "Fixed scan profile bundles only; no free-form flags or aggressive script execution."),
+        ("OWASP ZAP", "Live", "Web application and API vulnerability assessment and active scan validation", "Active validation scans strictly require a prior 15-minute human approval token."),
+        ("Nikto", "Live", "Web-server configuration, outdated components, and known security issue checks", "Fixed quick_recon and web_quick mode only; tuning and mutation flags not permitted."),
+        ("Burp Suite Community", "Import-only", "Web security testing, analyst-assisted validation, and proxy issue ingestion", "Free Community edition provides no automated REST API; manual export and report import supported via Integration Matrix."),
+        ("Nessus", "Import-only", "Comprehensive infrastructure vulnerability scanning and compliance auditing", "Commercial tool; no live daemon claimed; native .nessus XML and CSV export import supported."),
+        ("OpenVAS / Greenbone", "Import-only", "Infrastructure vulnerability assessment, CVE mapping, and cross-tool correlation", "Resource-heavy server daemon; external report import supported without live claim."),
+        ("Metasploit", "Planned", "Controlled, lab-only validation and proof-of-concept verification", "Autonomous exploitation is strictly forbidden by Constitution Principle I; lab-only proof validation planned."),
+    ]
+    lines = []
+    for name, status, role, lim in catalog:
+        if status == "Live":
+            exec_note = f"[Status: {status}] Automated live adapter available. Can be selected as executable proposal 'tool'."
+        elif status == "Import-only":
+            exec_note = f"[Status: {status}] Import-only. CANNOT be selected in proposal 'tool' field. If relevant, name it in 'rationale' to advise manual testing and report import via Integration Matrix."
+        else:
+            exec_note = f"[Status: {status}] Planned lab validation. CANNOT be selected in proposal 'tool' field."
+        lines.append(f"• {name}: {exec_note} (Role: {role}. Limitations: {lim})")
+    return "\n".join(lines)
+
+
 def _messages(context: ProposalContext) -> list[dict[str, str]]:
     system = (
         "You are an expert, authorized VAPT security planner for authorized lab targets.\n"
         "Select the next single assessment step based on the analyst request, scope, and discovered evidence.\n\n"
+        "Security Tool Catalog & Truthful Integration Statuses:\n"
+        f"{_seven_tools_prompt_catalog()}\n\n"
+        "CRITICAL EXECUTION GUARDRAIL:\n"
+        "- The executable 'tool' field in your JSON response (and in anticipated_next_steps) MUST ONLY be one of the Live automated tools: 'nmap', 'nikto', or 'zap'.\n"
+        "- Never select an Import-only or Planned tool (Burp Suite, Nessus, OpenVAS, Metasploit) in the executable 'tool' field.\n"
+        "- However, in your 'rationale' and 'anticipated_next_steps' rationale fields, you MAY explicitly cite Import-only tools (e.g. Burp Suite Community for manual repeater/intercept testing, or Nessus/OpenVAS for comprehensive vulnerability imports) to advise the analyst on manual assessment workflows and importing findings through the Integration Matrix.\n\n"
         "Return ONLY one JSON object matching this exact schema:\n"
         '{"tool":"nmap|nikto|zap","profile":"named_profile","target":"IPv4 or hostname",'
         '"port":integer,"rationale":"evidence-grounded reason",'
         '"anticipated_next_steps":[{"tool":"nmap|nikto|zap","profile":"named_profile",'
         '"rationale":"non-binding preview"}]}\n\n'
-        "Allowed tools and profiles:\n"
+        "Allowed executable tools and profiles:\n"
         "- nmap: quick_recon, service_version_scan, targeted_port_scan, full_port_scan, os_detection\n"
         "- nikto: web_quick, quick_recon\n"
         "- zap: web_quick, quick_recon, spider, active_scan\n\n"
