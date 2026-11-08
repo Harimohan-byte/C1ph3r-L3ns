@@ -8,6 +8,7 @@ import socket
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -424,8 +425,31 @@ def gate_proposal(
         print(f"[CIPHER LENS GATE] Rate limit check: BLOCKED — {rate_decision.reason}", flush=True)
         return _blocked(repository, proposal, source, rate_decision.reason)
     if action == ActionClass.ACTIVE_VALIDATION:
-        status = ProposalStatus.AWAITING_APPROVAL
-        reason = "Active validation requires explicit human approval."
+        # Check if an active, non-expired human approval exists in the repository
+        approved_records = repository.list_approvals(context.scope.id, status="approved")
+        matched_approval = None
+        for app in approved_records:
+            if app.target == normalize_target(proposal.target) and (app.port is None or app.port == proposal.port):
+                if app.expires_at:
+                    try:
+                        exp = datetime.fromisoformat(app.expires_at)
+                        if exp.tzinfo is None:
+                            exp = exp.replace(tzinfo=timezone.utc)
+                        if exp > datetime.now(timezone.utc):
+                            matched_approval = app
+                            break
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    matched_approval = app
+                    break
+
+        if matched_approval is not None:
+            status = ProposalStatus.APPROVED
+            reason = f"Active validation approved via human authorization token #{matched_approval.id[:8]}."
+        else:
+            status = ProposalStatus.AWAITING_APPROVAL
+            reason = "Active validation requires explicit human approval."
     else:
         status = ProposalStatus.APPROVED
         reason = "Schema, scope, profile, and rate-limit gates passed."

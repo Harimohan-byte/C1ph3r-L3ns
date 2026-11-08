@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -19,9 +20,10 @@ from cipher_lens.adapters.nikto import NiktoAdapter
 from cipher_lens.adapters.zap import ZapAdapter
 from cipher_lens.config import data_directory
 from cipher_lens.domain.models import ActionClass, ProposalStatus
+from cipher_lens.domain.scope import normalize_target
 from cipher_lens.persistence.repositories import ApprovalSummary, Repository, ScanRunSummary
 from cipher_lens.services.findings import ingest_and_store_findings
-from cipher_lens.services.planning import InMemoryRateLimiter, ProposalContext, propose_and_gate
+from cipher_lens.services.planning import InMemoryRateLimiter, ProposalContext, ProposalOutcome, propose_and_gate
 from cipher_lens.ui.mono import friendly_validation_message, heading, inline_error, status_badge
 
 
@@ -462,6 +464,34 @@ def render(repository: Repository) -> None:
     # -------------------------------------------------------------------
     if "last_proposal" in st.session_state and st.session_state.get("last_proposal_scope_id") == selected.id:
         outcome = st.session_state.last_proposal
+
+        # Dynamically upgrade AWAITING_APPROVAL proposal if human approval was granted
+        if outcome.status == ProposalStatus.AWAITING_APPROVAL and outcome.proposal is not None:
+            approved_records = repository.list_approvals(selected.id, status="approved")
+            for app in approved_records:
+                if normalize_target(app.target) == normalize_target(outcome.proposal.target) and (
+                    app.port is None or app.port == outcome.proposal.port
+                ):
+                    is_valid = True
+                    if app.expires_at:
+                        try:
+                            exp = datetime.fromisoformat(app.expires_at)
+                            if exp.tzinfo is None:
+                                exp = exp.replace(tzinfo=timezone.utc)
+                            if exp <= datetime.now(timezone.utc):
+                                is_valid = False
+                        except (ValueError, TypeError):
+                            is_valid = False
+                    if is_valid:
+                        outcome = ProposalOutcome(
+                            status=ProposalStatus.APPROVED,
+                            proposal=outcome.proposal,
+                            source=getattr(outcome, "source", "ai"),
+                            reason=f"Active validation approved via human authorization token #{app.id[:8]}.",
+                        )
+                        st.session_state.last_proposal = outcome
+                        break
+
         st.divider()
         st.subheader("📋 Review AI Step Proposal")
         st.caption("The AI has planned the step below. Review the target, tool, and rationale. No tool runs until you click Execute.")
@@ -485,7 +515,9 @@ def render(repository: Repository) -> None:
                 matched_approval_id = None
                 approved_records = repository.list_approvals(selected.id, status="approved")
                 for app in approved_records:
-                    if app.target == outcome.proposal.target and (app.port is None or app.port == outcome.proposal.port):
+                    if normalize_target(app.target) == normalize_target(outcome.proposal.target) and (
+                        app.port is None or app.port == outcome.proposal.port
+                    ):
                         matched_approval_id = app.id
                         break
 
@@ -504,6 +536,17 @@ def render(repository: Repository) -> None:
                     st.session_state["last_proposal_executed"] = True
                     st.session_state["last_scan_msg"] = msg
                     st.rerun()
+
+        elif outcome.status == ProposalStatus.AWAITING_APPROVAL and outcome.proposal is not None:
+            st.warning(
+                f"⏳ **Active validation gate:** `{outcome.proposal.tool.value.upper()}` ({outcome.proposal.profile.value}) "
+                f"on `{outcome.proposal.target}:{outcome.proposal.port}` requires explicit human approval before execution.\n\n"
+                f"1. Navigate to **Audit trail & approvals** in the sidebar.\n"
+                f"2. Under **Request active validation approval**, submit a request for `{outcome.proposal.target}:{outcome.proposal.port}`.\n"
+                f"3. Expand the pending card, review, and click **Approve validation**.\n"
+                f"4. Return to this page — this gate will automatically unlock.",
+                icon="⏳",
+            )
 
         elif outcome.status == ProposalStatus.BLOCKED:
             st.info(

@@ -387,3 +387,48 @@ def test_llm_proposal_with_import_tool_in_executable_tool_field_is_rejected(tmp_
     assert outcome.status == ProposalStatus.APPROVED
     assert outcome.source == "deterministic_fallback"
     assert outcome.proposal.tool.value in {"nmap", "nikto", "zap"}
+
+
+def test_gate_proposal_approves_active_validation_when_approval_recorded(tmp_path: Path):
+    """Active validation is unlocked once an unexpired human approval exists in repository."""
+    from cipher_lens.services.approvals import record_approval
+
+    repository, context = scope_context(tmp_path)
+    proposal = PlanProposal(
+        tool="zap", profile="active_scan", target="lab.example", port=80, rationale="Active scan."
+    )
+    # Without approval, it should be AWAITING_APPROVAL
+    outcome_unapproved = gate_proposal(
+        repository,
+        context,
+        proposal,
+        "test",
+        action=ActionClass.ACTIVE_VALIDATION,
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    assert outcome_unapproved.status == ProposalStatus.AWAITING_APPROVAL
+
+    # Record valid human approval
+    app_id = record_approval(
+        repository,
+        context.scope,
+        target="lab.example",
+        port=80,
+        scheme="http",
+        action=ActionClass.ACTIVE_VALIDATION,
+        actor="Security Officer",
+        rationale="Approved for lab target.",
+        approved=True,
+    )
+
+    # Now gating should recognize the approval and transition to APPROVED
+    outcome_approved = gate_proposal(
+        repository,
+        context,
+        proposal,
+        "test",
+        action=ActionClass.ACTIVE_VALIDATION,
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    assert outcome_approved.status == ProposalStatus.APPROVED
+    assert f"#{app_id[:8]}" in outcome_approved.reason
