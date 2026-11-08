@@ -220,7 +220,7 @@ def render(repository: Repository) -> None:
                     "Decided at": item.decided_at or "Pending",
                     "Expires at": item.expires_at or "N/A",
                 })
-            st.dataframe(rows, hide_index=True, use_container_width=True)
+            st.dataframe(rows, hide_index=True, width="stretch")
 
     with tab_audit:
         st.subheader("Immutable audit trail")

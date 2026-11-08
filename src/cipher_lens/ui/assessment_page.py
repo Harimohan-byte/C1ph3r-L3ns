@@ -645,5 +645,5 @@ def render(repository: Repository) -> None:
     st.dataframe(
         [_approval_row(approval) for approval in approvals],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
