@@ -53,12 +53,12 @@ Copy-Item .env.example .env
 
 Configuration variables in `.env`:
 - `CIPHER_LENS_DATA_DIR`: Base directory for SQLite databases, raw XML/JSON evidence, and reports (defaults to `./data`).
-- `PROVIDER_1_BASE_URL` / `PROVIDER_1_API_KEY` / `PROVIDER_1_MODEL`: Primary OpenAI-compatible model provider slot.
-- `PROVIDER_2_BASE_URL` / `PROVIDER_2_API_KEY` / `PROVIDER_2_MODEL`: Secondary model provider slot for auditable failover.
+- `PROVIDER_1_BASE_URL` / `PROVIDER_1_API_KEY` / `PROVIDER_1_MODEL`: Primary AI model slot (pre-configured for Google Gemini OpenAI-compatible endpoint `https://generativelanguage.googleapis.com/v1beta/openai`).
+- `PROVIDER_2_BASE_URL` / `PROVIDER_2_API_KEY` / `PROVIDER_2_MODEL`: Secondary model slot for auditable failover.
 - `ZAP_BASE_URL`: Base address of the local OWASP ZAP daemon (defaults to `http://127.0.0.1:8080`).
 - `NVD_API_KEY`: Optional NIST NVD API 2.0 key for automated CVE/CVSS enrichment (leave blank for zero-cost operation).
 
-> **Note**: When no model provider slots are configured, CIPHER LENS automatically uses its deterministic, rule-based local planning engine.
+> **Note**: In `.env.example`, Google Gemini endpoints and models (`gemini-2.0-flash-lite` and `gemini-2.0-flash`) are pre-filled so you only need to paste your API keys. When no keys are configured, CIPHER LENS automatically uses its deterministic, rule-based local planning engine.
 
 ### 4. Running the Application
 
