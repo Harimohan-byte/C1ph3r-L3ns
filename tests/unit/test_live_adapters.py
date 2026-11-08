@@ -1,6 +1,7 @@
 from pathlib import Path
 from urllib.error import URLError
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from cipher_lens.adapters.base import AdapterContext, AdapterRequest, ScanRunStatus
 from cipher_lens.adapters.nikto import NiktoAdapter
@@ -35,7 +36,8 @@ def test_nmap_unavailable_is_audited_after_successful_validation(tmp_path: Path)
             "tool": "nmap", "profile": "service_version_scan", "rationale": "Inspect an observed service."
         }],
     ))
-    handle = adapter.start(current, validated)
+    with patch("shutil.which", return_value=None):
+        handle = adapter.start(current, validated)
     assert handle.status == ScanRunStatus.FAILED
     assert "unavailable" in handle.reason.lower()
     assert PROFILE_FLAGS["targeted_port_scan"] == ("-sT", "-sV", "--reason", "-n", "-Pn", "--open", "-T3")
@@ -48,7 +50,8 @@ def test_nikto_unavailable_is_explicit(tmp_path: Path):
     adapter = NiktoAdapter()
     current = context(tmp_path)
     validated = adapter.validate(current, AdapterRequest(target="lab.example", port=80, profile="quick_recon", rationale="Check the web service."))
-    handle = adapter.start(current, validated)
+    with patch("shutil.which", return_value=None):
+        handle = adapter.start(current, validated)
     assert handle.status == ScanRunStatus.FAILED
     assert "unavailable" in handle.reason.lower()
 
