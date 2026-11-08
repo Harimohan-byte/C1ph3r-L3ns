@@ -212,6 +212,10 @@ class ToolAdapter(ABC):
     def parse(self, context: AdapterContext, handle: RunHandle, raw_output: bytes) -> ParseResult:
         """Map completed XML/JSON to Findings and persist the immutable raw artifact."""
 
+    def get_output_path(self, run_id: str, context: AdapterContext | None = None) -> Path | None:
+        """Return the primary output artifact path for the specified run if known, else None."""
+        return None
+
     def persist_raw_artifact(
         self, context: AdapterContext, run_id: str | None, raw_output: bytes, extension: str
     ) -> EvidenceArtifact:

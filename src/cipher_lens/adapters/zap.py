@@ -23,6 +23,7 @@ class _ZapRun:
     endpoint: str
     deadline: float
     target_url: str
+    output_path: Path | None = None
 
 
 class ZapAdapter(ToolAdapter):
@@ -85,7 +86,14 @@ class ZapAdapter(ToolAdapter):
             elif isinstance(exc, (URLError, ValueError)):
                 err_msg = str(exc)
             return self._fail(context, run_id, f"ZAP active scan error: {err_msg}")
-        self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds, active_target_url)
+        output_path = context.artifact_directory / self.tool_name / f"{run_id}.json"
+        self._runs[run_id] = _ZapRun(
+            scan_id,
+            endpoint.split("/")[2],
+            time.monotonic() + request.timeout_seconds,
+            active_target_url,
+            output_path,
+        )
 
         # Persist metadata to disk so ZAP scans survive reloads and background recovery
         meta_path = context.artifact_directory / self.tool_name / f"{run_id}.meta.json"
@@ -206,6 +214,17 @@ class ZapAdapter(ToolAdapter):
 
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.DONE.value)
         return ParseResult(evidence=evidence, findings=findings)
+
+    def get_output_path(self, run_id: str, context: AdapterContext | None = None) -> Path | None:
+        """Return the primary output JSON path for this ZAP run."""
+        run = self._runs.get(run_id)
+        if run is not None and run.output_path is not None:
+            return run.output_path
+        if context is not None:
+            candidate = context.artifact_directory / self.tool_name / f"{run_id}.json"
+            if candidate.exists():
+                return candidate
+        return None
 
     def _available(self) -> bool:
         try:

@@ -98,3 +98,110 @@ def test_mid_scan_page_reload_does_not_fail_running_scan(tmp_path: Path):
     assert runs[0].status == "running"
     assert runs[0].error_message is None
 
+
+def test_execute_and_collect_scan_uses_get_output_path_for_all_adapters(tmp_path: Path):
+    """Regression test: _execute_and_collect_scan retrieves output_path via get_output_path
+
+    without touching private _runs, preventing TypeError on custom _ZapRun objects.
+    """
+    from unittest.mock import MagicMock, patch
+    from cipher_lens.adapters.base import Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ValidationResult
+    from cipher_lens.adapters.base import AdapterContext, Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ValidationResult
+    from cipher_lens.adapters.nikto import NiktoAdapter
+    from cipher_lens.adapters.nmap import NmapAdapter
+    from cipher_lens.adapters.zap import ZapAdapter, _ZapRun
+    from cipher_lens.domain.models import ActionClass, PlanProposal, ScanProfile, ScopeRegistration, ToolName
+    from cipher_lens.services.planning import InMemoryRateLimiter
+    from cipher_lens.services.scope_registration import register_scope
+    from cipher_lens.ui.assessment_page import _execute_and_collect_scan
+
+    repository = Repository(tmp_path / "test_collect.sqlite3")
+    scope = register_scope(
+        repository,
+        ScopeRegistration(
+            target="127.0.0.1",
+            allowed_ports="3000",
+            excluded_ports="",
+            excluded_endpoints="",
+            engagement_note="Test note",
+            authorized_lab_attested=True,
+            allowed_actions={ActionClass.RECON, ActionClass.ACTIVE_VALIDATION},
+        ),
+    )
+
+    rate_limiter = InMemoryRateLimiter(clock=lambda: 0)
+    artifact_dir = tmp_path / "artifacts" / scope.id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    ctx = AdapterContext(repository, scope, artifact_dir, rate_limiter)
+
+    # 1. Test NMAP
+    nmap_adapter = NmapAdapter()
+    run_id_nmap = "run-nmap-101"
+    nmap_xml = artifact_dir / "nmap" / f"{run_id_nmap}.xml"
+    nmap_xml.parent.mkdir(parents=True, exist_ok=True)
+    nmap_xml.write_bytes(b"<nmaprun></nmaprun>")
+    nmap_adapter._runs[run_id_nmap] = (MagicMock(), nmap_xml, 9999999.0)
+
+    nmap_proposal = PlanProposal(
+        tool=ToolName.NMAP, profile=ScanProfile.QUICK_RECON, target="127.0.0.1", port=3000, rationale="Port recon."
+    )
+
+    with patch.object(nmap_adapter, "validate", return_value=ValidationResult(ScanRunStatus.QUEUED, "OK", MagicMock(), "ticket")), \
+         patch.object(nmap_adapter, "start", return_value=RunHandle(run_id_nmap, ScanRunStatus.RUNNING)), \
+         patch.object(nmap_adapter, "poll", return_value=PollResult(run_id_nmap, ScanRunStatus.PARSING)), \
+         patch.object(nmap_adapter, "parse", return_value=ParseResult(evidence=MagicMock(id="ev-1", file_path=nmap_xml, sha256="abc", tool="nmap"), findings=[])), \
+         patch("cipher_lens.ui.assessment_page._session_adapters", return_value={"nmap": nmap_adapter}), \
+         patch("streamlit.empty", return_value=MagicMock()):
+        out_id, msg = _execute_and_collect_scan(repository, scope, nmap_proposal, ctx)
+        assert out_id == run_id_nmap
+        assert "completed successfully" in (msg or "")
+
+    # 2. Test NIKTO
+    nikto_adapter = NiktoAdapter()
+    run_id_nikto = "run-nikto-202"
+    nikto_xml = artifact_dir / "nikto" / f"{run_id_nikto}.xml"
+    nikto_xml.parent.mkdir(parents=True, exist_ok=True)
+    nikto_xml.write_bytes(b"<niktoscan></niktoscan>")
+    nikto_adapter._runs[run_id_nikto] = (MagicMock(), nikto_xml, 9999999.0)
+
+    nikto_proposal = PlanProposal(
+        tool=ToolName.NIKTO, profile=ScanProfile.WEB_QUICK, target="127.0.0.1", port=3000, rationale="Web recon."
+    )
+
+    with patch.object(nikto_adapter, "validate", return_value=ValidationResult(ScanRunStatus.QUEUED, "OK", MagicMock(), "ticket")), \
+         patch.object(nikto_adapter, "start", return_value=RunHandle(run_id_nikto, ScanRunStatus.RUNNING)), \
+         patch.object(nikto_adapter, "poll", return_value=PollResult(run_id_nikto, ScanRunStatus.PARSING)), \
+         patch.object(nikto_adapter, "parse", return_value=ParseResult(evidence=MagicMock(id="ev-2", file_path=nikto_xml, sha256="def", tool="nikto"), findings=[])), \
+         patch("cipher_lens.ui.assessment_page._session_adapters", return_value={"nikto": nikto_adapter}), \
+         patch("streamlit.empty", return_value=MagicMock()):
+        out_id, msg = _execute_and_collect_scan(repository, scope, nikto_proposal, ctx)
+        assert out_id == run_id_nikto
+        assert "completed successfully" in (msg or "")
+
+    # 3. Test ZAP — specifically with _ZapRun (dataclass, NOT a subscriptable tuple)
+    zap_adapter = ZapAdapter()
+    run_id_zap = "run-zap-303"
+    zap_json = artifact_dir / "zap" / f"{run_id_zap}.json"
+    zap_json.parent.mkdir(parents=True, exist_ok=True)
+    zap_json.write_text('{"alerts": []}')
+    # Note: _ZapRun object is NOT subscriptable (no __getitem__)
+    zap_adapter._runs[run_id_zap] = _ZapRun(
+        scan_id="1", endpoint="ascan", deadline=9999999.0, target_url="http://127.0.0.1:3000", output_path=zap_json
+    )
+
+    zap_proposal = PlanProposal(
+        tool=ToolName.ZAP, profile=ScanProfile.ACTIVE_SCAN, target="127.0.0.1", port=3000, rationale="Active scan."
+    )
+
+    with patch.object(zap_adapter, "validate", return_value=ValidationResult(ScanRunStatus.QUEUED, "OK", MagicMock(), "ticket")), \
+         patch.object(zap_adapter, "start", return_value=RunHandle(run_id_zap, ScanRunStatus.RUNNING)), \
+         patch.object(zap_adapter, "poll", return_value=PollResult(run_id_zap, ScanRunStatus.PARSING, progress=100)), \
+         patch.object(zap_adapter, "parse", return_value=ParseResult(evidence=MagicMock(id="ev-3", file_path=zap_json, sha256="ghi", tool="zap"), findings=[])), \
+         patch("cipher_lens.ui.assessment_page._session_adapters", return_value={"zap": zap_adapter}), \
+         patch("streamlit.empty", return_value=MagicMock()):
+        # This call previously crashed with TypeError: '_ZapRun' object is not subscriptable
+        out_id, msg = _execute_and_collect_scan(repository, scope, zap_proposal, ctx)
+        assert out_id == run_id_zap
+        assert "completed successfully" in (msg or "")
+
+

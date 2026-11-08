@@ -193,6 +193,17 @@ class NmapAdapter(ToolAdapter):
                detail={"tool": self.tool_name, "finding_count": len(findings)})
         return ParseResult(evidence=evidence, findings=findings)
 
+    def get_output_path(self, run_id: str, context: AdapterContext | None = None) -> Path | None:
+        """Return the primary output XML path for this Nmap run."""
+        state = self._runs.get(run_id)
+        if state is not None:
+            return state[1]
+        if context is not None:
+            candidate = context.artifact_directory / self.tool_name / f"{run_id}.xml"
+            if candidate.exists():
+                return candidate
+        return None
+
     def _fail_unavailable(self, context: AdapterContext, run_id: str, reason: str) -> RunHandle:
         context.repository.update_scan_run(run_id, ScanRunStatus.FAILED.value, reason)
         record(context.repository, event_type="adapter_start", outcome="failed", entity_type="scan_run", entity_id=run_id,

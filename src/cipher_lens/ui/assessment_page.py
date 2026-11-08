@@ -268,8 +268,9 @@ def _execute_and_collect_scan(
                 context.artifact_directory / f"{handle.run_id}.xml",
                 context.artifact_directory / f"{handle.run_id}.json",
             ]
-            if hasattr(adapter, "_runs") and handle.run_id in adapter._runs:
-                candidates.insert(0, adapter._runs[handle.run_id][1])
+            primary_path = adapter.get_output_path(handle.run_id, context)
+            if primary_path is not None:
+                candidates.insert(0, primary_path)
 
             output_path = next((p for p in candidates if p.exists() and p.stat().st_size > 0), None)
 
@@ -332,6 +333,9 @@ def _recover_orphaned_scans(repository: Repository, scope_id: str) -> None:
                 artifact_dir / f"{r.id}.xml",
                 artifact_dir / f"{r.id}.json",
             ]
+            primary_path = adapter.get_output_path(r.id, ctx)
+            if primary_path is not None:
+                candidates.insert(0, primary_path)
             output_file = next((f for f in candidates if f.exists() and f.stat().st_size > 0), None)
             if output_file:
                 try:

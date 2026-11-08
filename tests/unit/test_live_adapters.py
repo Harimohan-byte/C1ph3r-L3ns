@@ -366,4 +366,37 @@ def test_zap_meta_json_persistence_and_poll_progress(tmp_path: Path):
     assert poll_result.status == ScanRunStatus.RUNNING
     assert poll_result.progress == 55
 
+    # 3. Verify get_output_path works via public method on both in-memory and recovered instances
+    expected_path = artifact_dir / "zap" / f"{handle.run_id}.json"
+    assert adapter.get_output_path(handle.run_id) == expected_path
+
+    # Fresh instance without in-memory state recovers output_path using ctx if file exists
+    expected_path.parent.mkdir(parents=True, exist_ok=True)
+    expected_path.write_text('{"alerts": []}')
+    assert fresh_adapter.get_output_path(handle.run_id, ctx) == expected_path
+    assert fresh_adapter.get_output_path("unknown-run", ctx) is None
+
+
+def test_nmap_and_nikto_get_output_path_public_contract(tmp_path: Path):
+    """Verify Nmap and Nikto adapters correctly expose get_output_path."""
+    from cipher_lens.adapters.nikto import NiktoAdapter
+    from cipher_lens.adapters.nmap import NmapAdapter
+
+    nmap = NmapAdapter()
+    run_nmap = "run-nmap-test"
+    dummy_xml_nmap = tmp_path / "nmap.xml"
+    dummy_xml_nmap.write_text("<nmap/>")
+    nmap._runs[run_nmap] = (None, dummy_xml_nmap, 0.0)
+    assert nmap.get_output_path(run_nmap) == dummy_xml_nmap
+    assert nmap.get_output_path("other") is None
+
+    nikto = NiktoAdapter()
+    run_nikto = "run-nikto-test"
+    dummy_xml_nikto = tmp_path / "nikto.xml"
+    dummy_xml_nikto.write_text("<nikto/>")
+    nikto._runs[run_nikto] = (None, dummy_xml_nikto, 0.0)
+    assert nikto.get_output_path(run_nikto) == dummy_xml_nikto
+    assert nikto.get_output_path("other") is None
+
+
 

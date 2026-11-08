@@ -108,3 +108,12 @@ def test_start_rejects_a_fabricated_or_replayed_validation_result(tmp_path: Path
     adapter.require_startable(context, valid)
     with pytest.raises(ValueError, match="stale"):
         adapter.require_startable(context, valid)
+
+
+def test_tool_adapter_default_get_output_path_returns_none(tmp_path: Path):
+    """Base ToolAdapter contract defines get_output_path defaulting to None."""
+    _, context = adapter_context(tmp_path)
+    adapter = FakeAdapter()
+    assert adapter.get_output_path("nonexistent-run-id") is None
+    assert adapter.get_output_path("nonexistent-run-id", context) is None
+
