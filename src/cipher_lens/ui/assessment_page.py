@@ -214,14 +214,18 @@ def _execute_and_collect_scan(
             st.error(f"Scan could not start: {handle.reason}")
             return None, None
 
-        # Poll every 0.5s up to 45s for recon scan completion
-        deadline = time.monotonic() + 45.0
+        # Poll every 1.0s up to 60s for recon scan completion
+        deadline = time.monotonic() + 60.0
         poll_res = None
+        poll_count = 0
         while time.monotonic() < deadline:
             poll_res = adapter.poll(context, handle)
             if poll_res.status != ScanRunStatus.RUNNING:
                 break
-            time.sleep(0.5)
+            poll_count += 1
+            if poll_count % 5 == 0:
+                print(f"[CIPHER LENS UI] Waiting for {tool_name.upper()}... elapsed: {poll_count}s", flush=True)
+            time.sleep(1.0)
 
         if poll_res is None or poll_res.status == ScanRunStatus.RUNNING:
             st.warning(f"Scan `{handle.run_id}` is taking longer than expected. It is still processing.")
@@ -376,12 +380,18 @@ def render(repository: Repository) -> None:
     # Display active background scans banner if any
     active_runs = [r for r in repository.list_scan_runs(selected.id) if r.status in {"running", "parsing"}]
     if active_runs:
-        for ar in active_runs:
-            st.info(
-                f"⏳ **{ar.tool.upper()} scan ({ar.profile}) is executing in the background.** "
-                f"Navigating or reloading will not interrupt it; findings will correlate automatically once finished.",
-                icon="ℹ️",
-            )
+        col_ar1, col_ar2 = st.columns([4, 1])
+        with col_ar1:
+            for ar in active_runs:
+                st.info(
+                    f"⏳ **{ar.tool.upper()} scan ({ar.profile}) is executing in the background.** "
+                    f"Navigating or reloading will not interrupt it; click 'Refresh Scan Status' to check if completed.",
+                    icon="ℹ️",
+                )
+        with col_ar2:
+            st.write("")
+            if st.button("🔄 Refresh Status", key="refresh_scan_status_btn"):
+                st.rerun()
 
     # -------------------------------------------------------------------
     # Section 1: AI Planner

@@ -71,9 +71,25 @@ class NiktoAdapter(ToolAdapter):
             return self._fail(context, run_id, "Nikto is unavailable on PATH.")
         output_path = context.artifact_directory / self.tool_name / f"{run_id}.xml"
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [executable, "-host", request.target, "-port", str(request.port), "-Format", "xml", "-output", str(output_path)]
+        command = [
+            executable,
+            "-host", request.target,
+            "-port", str(request.port),
+            "-Format", "xml",
+            "-output", str(output_path),
+            "-Tuning", "1,2,3,b",
+            "-timeout", "3",
+            "-maxtime", "45s",
+        ]
         try:
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+            print(f"\n[CIPHER LENS NIKTO] Launched Nikto PID {process.pid}: {' '.join(command)}", flush=True)
         except OSError as error:
             return self._fail(context, run_id, f"Nikto could not start: {error.__class__.__name__}.")
         self._runs[run_id] = (process, output_path, time.monotonic() + request.timeout_seconds)
