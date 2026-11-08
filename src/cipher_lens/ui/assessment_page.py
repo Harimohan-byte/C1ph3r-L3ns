@@ -97,42 +97,62 @@ def _approval_row(approval: ApprovalSummary) -> dict[str, str]:
 # AI proposal card renderer
 # ---------------------------------------------------------------------------
 def _render_proposal_outcome(outcome, source: str) -> None:
-    """Display the AI-generated proposal outcome card in a styled card."""
+    """Display the AI-generated proposal outcome card in a modular Bento card."""
     p = outcome.proposal
     status_map = {
-        ProposalStatus.APPROVED: ("cl-success-card", "✓ Approved — ready to execute"),
-        ProposalStatus.AWAITING_APPROVAL: ("", "⏳ Awaiting human approval"),
-        ProposalStatus.REJECTED: ("", "✗ Rejected by scope gate"),
-        ProposalStatus.BLOCKED: ("", "⚠ Blocked by rate limit"),
+        ProposalStatus.APPROVED: ("cl-success-card", "✓ Approved — Ready to Execute"),
+        ProposalStatus.AWAITING_APPROVAL: ("", "⏳ Awaiting Human Approval"),
+        ProposalStatus.REJECTED: ("", "✗ Rejected by Scope Gate"),
+        ProposalStatus.BLOCKED: ("", "⚠ Blocked by Rate Limit"),
     }
     card_cls, label = status_map.get(outcome.status, ("", str(outcome.status)))
+    badge_status = "done" if outcome.status == ProposalStatus.APPROVED else "failed"
+
+    tool_text = html.escape(p.tool.value.upper() if p else "N/A")
+    profile_text = html.escape(p.profile.value if p else "default")
+    port_text = html.escape(str(p.port) if p and p.port else "All Allowed")
+    target_text = html.escape(p.target if p else "N/A")
+    rationale_text = html.escape(p.rationale if p else "No rationale provided.")
+    gate_reason = html.escape(outcome.reason)
 
     st.markdown(
         f'<div class="cl-card {card_cls}">'
-        f'<strong>AI Proposal · {html.escape(label)}</strong>'
-        f'<br><span class="cl-tech">Source: {html.escape(source)}</span>'
+        f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">'
+        f'<div><span class="cl-kicker" style="font-size: 0.78rem;">Step Proposal</span>'
+        f'<h4 style="margin: 0.2rem 0 0 0; color: #032E2B; font-weight: 800;">{tool_text} · {profile_text}</h4></div>'
+        f'<span class="cl-status cl-status-{badge_status}">{html.escape(label)}</span>'
+        f'</div>'
+        f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin: 0.6rem 0;">'
+        f'<div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 8px; padding: 0.5rem 0.75rem;">'
+        f'<span style="color: #5D7A42; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Target</span>'
+        f'<span style="color: #BBF351; font-family: \'JetBrains Mono\', monospace; font-size: 1rem; font-weight: 700;">{target_text}</span>'
+        f'</div>'
+        f'<div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 8px; padding: 0.5rem 0.75rem;">'
+        f'<span style="color: #5D7A42; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Port</span>'
+        f'<span style="color: #BBF351; font-family: \'JetBrains Mono\', monospace; font-size: 1rem; font-weight: 700;">{port_text}</span>'
+        f'</div>'
+        f'<div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 8px; padding: 0.5rem 0.75rem;">'
+        f'<span style="color: #5D7A42; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Tool</span>'
+        f'<span style="color: #BBF351; font-family: \'JetBrains Mono\', monospace; font-size: 1rem; font-weight: 700;">{tool_text}</span>'
+        f'</div>'
+        f'<div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 8px; padding: 0.5rem 0.75rem;">'
+        f'<span style="color: #5D7A42; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Profile</span>'
+        f'<span style="color: #F7F3EB; font-family: \'JetBrains Mono\', monospace; font-size: 0.95rem; font-weight: 600;">{profile_text}</span>'
+        f'</div>'
+        f'</div>'
+        f'<div style="background: #FFFDF8; border: 1px solid #E5D7C0; border-radius: 8px; padding: 0.65rem 0.85rem; margin: 0.6rem 0;">'
+        f'<strong style="color: #032E2B; font-size: 0.88rem;">AI Rationale:</strong> '
+        f'<span style="color: #20231B; font-size: 0.92rem;">{rationale_text}</span>'
+        f'</div>'
+        f'<span class="cl-muted" style="font-size: 0.8rem;">Safety Gate: {gate_reason} · Source: {html.escape(source.upper())}</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    if p:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Tool", p.tool.value.upper())
-        with col2:
-            st.metric("Profile", p.profile.value)
-        with col3:
-            st.metric("Port", str(p.port))
-
-        st.markdown(f"**Target:** `{p.target}`")
-        st.markdown(f"**AI Rationale:** {html.escape(p.rationale)}")
-
-        if p.anticipated_next_steps:
-            with st.expander("Anticipated next steps (non-binding preview)", expanded=False):
-                for step in p.anticipated_next_steps:
-                    st.write(f"**{step.tool.value}** · {step.profile.value}: {step.rationale}")
-
-    st.caption(f"Gate reason: {outcome.reason}")
+    if p and p.anticipated_next_steps:
+        with st.expander("Anticipated next steps (non-binding preview)", expanded=False):
+            for step in p.anticipated_next_steps:
+                st.write(f"**{step.tool.value.upper()}** · `{step.profile.value}`: {step.rationale}")
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +232,7 @@ def _execute_and_collect_scan(
                 raw = output_path.read_bytes()
                 parse_result = adapter.parse(context, handle, raw)
                 if parse_result.findings:
-                    ingest_and_store_findings(repository, scope.id, parse_result.findings)
+                    ingest_and_store_findings(repository, handle.run_id, parse_result.findings, parse_result.evidence)
                     msg = (
                         f"✓ {tool_name.upper()} scan completed successfully: "
                         f"{len(parse_result.findings)} finding(s) discovered and correlated below."
@@ -255,7 +275,7 @@ def _recover_orphaned_scans(repository: Repository, scope_id: str) -> None:
                 )
                 parse_result = adapter.parse(ctx, RunHandle(r.id, ScanRunStatus.PARSING), raw)
                 if parse_result.findings:
-                    ingest_and_store_findings(repository, scope_id, parse_result.findings)
+                    ingest_and_store_findings(repository, r.id, parse_result.findings, parse_result.evidence)
             except Exception:
                 repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Could not parse artifact.")
         else:
@@ -380,7 +400,8 @@ def render(repository: Repository) -> None:
     if "last_proposal" in st.session_state and st.session_state.get("last_proposal_scope_id") == selected.id:
         outcome = st.session_state.last_proposal
         st.divider()
-        st.subheader("📋 AI Proposal")
+        st.subheader("📋 Review AI Step Proposal")
+        st.caption("The AI has planned the step below. Review the target, tool, and rationale. No tool runs until you click Execute.")
         _render_proposal_outcome(outcome, getattr(outcome, "source", "ai"))
 
         is_executed = st.session_state.get("last_proposal_executed", False)
@@ -392,6 +413,7 @@ def render(repository: Repository) -> None:
             else:
                 st.success("✓ Scan executed successfully. See discovered findings and timeline below.")
         elif outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
+            st.write("")
             if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):
                 artifact_dir = data_directory() / "artifacts" / selected.id
                 adapter_context = AdapterContext(

@@ -36,3 +36,38 @@ def test_recovery_guidance_is_read_only_and_status_specific():
 
     assert 'submit a new request' in recovery_guidance(failed)
     assert 'recorded analyst decision' in recovery_guidance(waiting)
+
+
+def test_render_proposal_outcome_uses_modular_bento_chips():
+    """Verify that _render_proposal_outcome renders modular bento chips instead of giant metrics."""
+    from unittest.mock import patch
+    from cipher_lens.domain.models import PlanProposal, ProposalStatus, ScanProfile, ToolName
+    from cipher_lens.services.planning import ProposalOutcome
+    from cipher_lens.ui.assessment_page import _render_proposal_outcome
+
+    proposal = PlanProposal(
+        tool=ToolName.NMAP,
+        profile=ScanProfile.QUICK_RECON,
+        target="127.0.0.1",
+        port=3000,
+        rationale="Initial port discovery.",
+    )
+    outcome = ProposalOutcome(
+        status=ProposalStatus.APPROVED,
+        proposal=proposal,
+        reason="Target within authorized scope.",
+        source="ai",
+    )
+
+    with patch("streamlit.markdown") as mock_markdown:
+        _render_proposal_outcome(outcome, "ai")
+        assert mock_markdown.called
+        html = mock_markdown.call_args[0][0]
+        # Verify modular Bento styling
+        assert "Step Proposal" in html
+        assert "127.0.0.1" in html
+        assert "3000" in html
+        assert "NMAP" in html
+        assert "quick_recon" in html
+        assert "Initial port discovery." in html
+
