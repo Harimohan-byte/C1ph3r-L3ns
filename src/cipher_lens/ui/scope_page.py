@@ -90,6 +90,7 @@ def render(repository: Repository) -> None:
     if not scopes:
         st.markdown('<div class="cl-card">No scope registered yet. Save an authorized lab boundary to begin.</div>', unsafe_allow_html=True)
         return
+
     for scope in scopes:
         st.markdown(
             f"<div class=\"cl-card\"><strong>{html.escape(scope.canonical_target)}</strong><br>"
@@ -97,3 +98,22 @@ def render(repository: Repository) -> None:
             f"<span class=\"cl-muted\">{html.escape(scope.engagement_note)}</span></div>",
             unsafe_allow_html=True,
         )
+
+    with st.expander("Reset lab database (start fresh)", expanded=False):
+        st.caption("Remove all registered scopes, scan runs, findings, and approvals to begin a clean demonstration.")
+        if st.button("Reset all lab data", type="secondary", key="reset_lab_data_btn"):
+            repository.reset_database()
+            for key in [
+                "last_proposal",
+                "last_proposal_scope_id",
+                "last_run_id",
+                "saved_assessment_objective",
+                "last_proposal_executed",
+                "last_scan_msg",
+                "rate_limiter",
+                "_adapters",
+            ]:
+                st.session_state.pop(key, None)
+            st.success("Lab database reset. All scopes and runs cleared.")
+            time.sleep(0.5)
+            st.rerun()

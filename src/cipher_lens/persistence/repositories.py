@@ -453,3 +453,14 @@ class Repository:
                 )
             )
         return results
+
+    def reset_database(self) -> None:
+        """Clear all stored data for lab reset/fresh demonstration."""
+        with self.connection() as connection:
+            connection.execute("DELETE FROM findings")
+            connection.execute("DELETE FROM evidence")
+            connection.execute("DELETE FROM approvals")
+            connection.execute("DELETE FROM scan_runs")
+            connection.execute("DELETE FROM audit_events")
+            connection.execute("DELETE FROM scopes")
+
