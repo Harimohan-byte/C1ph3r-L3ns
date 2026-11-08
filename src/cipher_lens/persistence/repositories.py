@@ -331,9 +331,16 @@ class Repository:
             return False, "The recorded approval is not approved."
         if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
             return False, "The recorded approval has expired."
-        expected = (scope_id, target, port, scheme, action)
-        actual = (row["scope_id"], row["target"], row["port"], row["scheme"], row["action"])
-        if actual != expected:
+        # Target, scope, port, and action must match.
+        # Scheme matches if identical, or if the recorded approval has no scheme restriction (scheme is None).
+        scheme_matches = (row["scheme"] is None) or (row["scheme"] == scheme)
+        if (
+            row["scope_id"] != scope_id
+            or row["target"] != target
+            or row["port"] != port
+            or not scheme_matches
+            or row["action"] != action
+        ):
             return False, "The recorded approval does not match this exact request."
         return True, "Recorded approval matches this request."
 

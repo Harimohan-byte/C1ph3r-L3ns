@@ -201,18 +201,21 @@ def _execute_and_collect_scan(
     validated = adapter.validate(context, request)
 
     if validated.status == ScanRunStatus.AWAITING_APPROVAL:
+        print(f"[CIPHER LENS UI] Validation check: AWAITING_APPROVAL", flush=True)
         st.warning(
             "Active validation requires explicit human approval. "
             "Submit an approval request in the **Audit trail & approvals** workspace, then return here."
         )
         return None, None
     if validated.status in {ScanRunStatus.BLOCKED, ScanRunStatus.FAILED}:
+        print(f"[CIPHER LENS UI] Validation blocked: {validated.reason}", flush=True)
         st.error(f"Validation blocked: {validated.reason}")
         return None, None
 
     with st.spinner(f"Executing {tool_name.upper()} ({proposal.profile.value}) on {proposal.target}:{proposal.port}…"):
         handle = adapter.start(context, validated)
         if handle.status == ScanRunStatus.FAILED:
+            print(f"[CIPHER LENS UI] Scan could not start: {handle.reason}", flush=True)
             st.error(f"Scan could not start: {handle.reason}")
             return None, None
 

@@ -51,6 +51,51 @@ def _kill_pid(pid: int) -> None:
         pass
 
 
+def classify_nikto_finding(desc: str, refs: str) -> tuple[str | None, str | None, float | None]:
+    """Map Nikto observation patterns to (CWE, Severity, CVSS) based on OWASP WSTG / ASVS guidelines.
+
+    Returns (cwe, severity, cvss).
+    """
+    text = f"{desc} {refs}".lower()
+
+    # 1. Critical vulnerabilities: Injection, RCE
+    if re.search(r"\b(sql injection|remote code execution|rce|command injection|buffer overflow)\b", text):
+        return ("CWE-89" if "sql" in text else "CWE-78", "critical", 9.8)
+
+    # 2. High severity exposures: Source code, sensitive files, credentials
+    if re.search(r"(\.git\b|\.env\b|package\.json|admin login|backup file|source code disclosure)", text):
+        return ("CWE-538", "high", 7.5)
+
+    # 3. Medium severity: Clickjacking, CSP, Session cookies, Insecure methods
+    if "x-frame-options" in text or "clickjacking" in text:
+        return ("CWE-1021", "medium", 5.4)
+    if "content-security-policy" in text or re.search(r"\bcsp\b", text):
+        return ("CWE-693", "medium", 5.0)
+    if "cookie" in text and "secure flag" in text:
+        return ("CWE-614", "medium", 5.3)
+    if "cookie" in text and "httponly" in text:
+        return ("CWE-1004", "medium", 5.3)
+    if re.search(r"\b(trace|track|put|delete)\b.*method", text) or "allowed methods" in text:
+        return ("CWE-16", "medium", 5.3)
+    if re.search(r"\b(cross-site|xss|csrf|open redirect)\b", text):
+        return ("CWE-79" if "xss" in text else "CWE-352", "medium", 6.1)
+
+    # 4. Low severity: MIME sniffing, HSTS, ETags, Uncommon headers
+    if "x-content-type-options" in text or "mime" in text:
+        return ("CWE-16", "low", 3.7)
+    if "strict-transport-security" in text or "hsts" in text:
+        return ("CWE-319", "low", 3.7)
+    if "etags" in text or "inode" in text:
+        return ("CWE-200", "low", 2.6)
+    if "uncommon header" in text or "x-download-options" in text or "x-powered-by" in text:
+        return ("CWE-200", "low", 2.6)
+    if "server banner" in text or "targetbanner" in text:
+        return ("CWE-200", "low", 2.6)
+
+    # 5. Default Informational
+    return (None, "info", None)
+
+
 class NiktoAdapter(ToolAdapter):
     tool_name = "nikto"
     allowed_profiles = frozenset({"quick_recon", "web_quick"})
@@ -186,14 +231,20 @@ class NiktoAdapter(ToolAdapter):
             cve = cve_match.group(0).upper() if cve_match else None
 
             cwe_match = re.search(r"\bCWE-\d+\b", combined, re.IGNORECASE)
-            cwe = cwe_match.group(0).upper() if cwe_match else None
+            explicit_cwe = cwe_match.group(0).upper() if cwe_match else None
+
+            # Enrich using OWASP/WSTG knowledge base for web configuration findings
+            heuristic_cwe, severity, cvss = classify_nikto_finding(desc, refs)
+            final_cwe = explicit_cwe or heuristic_cwe
 
             findings.append(Finding(
                 source_tool=self.tool_name,
                 affected_asset=target_ip,
                 description=desc,
                 cve=cve,
-                cwe=cwe,
+                cwe=final_cwe,
+                severity=severity,
+                cvss=cvss,
                 product=product,
                 version=version,
                 confidence="observed",

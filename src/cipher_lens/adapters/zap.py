@@ -50,16 +50,41 @@ class ZapAdapter(ToolAdapter):
         if not self._available():
             return self._fail(context, run_id, f"ZAP is unavailable at {self.base_url}.")
         target_url = f"{request.scheme}://{request.target}:{request.port}"
+
+        # Resolve loopback host alias (e.g. 127.0.0.1 <-> localhost) against ZAP's populated site tree
+        active_target_url = target_url
+        try:
+            sites_resp = self._json("/JSON/core/view/sites/", {})
+            sites = sites_resp.get("sites", []) if isinstance(sites_resp, dict) else []
+            if target_url not in sites:
+                alias_host = (
+                    "localhost"
+                    if request.target in {"127.0.0.1", "::1"}
+                    else ("127.0.0.1" if request.target.lower() == "localhost" else None)
+                )
+                if alias_host:
+                    alias_url = f"{request.scheme}://{alias_host}:{request.port}"
+                    if alias_url in sites:
+                        active_target_url = alias_url
+        except Exception:
+            pass
+
         if request.action.value == "active_validation":
             endpoint = "/JSON/ascan/action/scan/"
         else:
             endpoint = "/JSON/spider/action/scan/"
+        payload = None
         try:
-            payload = self._json(endpoint, {"url": target_url})
+            payload = self._json(endpoint, {"url": active_target_url})
             scan_id = str(payload["scan"])
-        except (KeyError, TypeError, URLError, ValueError):
-            return self._fail(context, run_id, "ZAP rejected the requested scan.")
-        self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds, target_url)
+        except (KeyError, TypeError, URLError, ValueError) as exc:
+            err_msg = "ZAP rejected the requested scan."
+            if isinstance(payload, dict):
+                err_msg = payload.get("message") or payload.get("code") or err_msg
+            elif isinstance(exc, (URLError, ValueError)):
+                err_msg = str(exc)
+            return self._fail(context, run_id, f"ZAP active scan error: {err_msg}")
+        self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds, active_target_url)
         context.repository.update_scan_run(run_id, ScanRunStatus.RUNNING.value)
         record(context.repository, event_type="adapter_start", outcome="running", entity_type="scan_run", entity_id=run_id,
                detail={"tool": self.tool_name, "target": request.target, "port": request.port, "mode": self._runs[run_id].endpoint})

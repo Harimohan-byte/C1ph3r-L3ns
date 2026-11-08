@@ -25,6 +25,7 @@ CIPHER LENS is a conversational VAPT assistant for explicitly authorized lab tar
 | 3 - Demonstrable workflow | Complete | Full assessment-to-report lifecycle verified end-to-end via integration test suite; all 61 tests pass. |
 | 4 - Verification & Release | Complete | Phase 6 cross-cutting verification complete: Graphify architecture regenerated, Spec Kit cross-artifact alignment verified with 0 gaps, client-ready quickstart and README validated. |
 | 5 - Hardening & Planning | Complete | Phase 11 T044-T046 complete: rerun-safe scan lifecycle (.meta.json, PID poll, non-destructive recovery), 7-tool aware planning prompt with strict Live tool selection enforcement, and ZAP pre-approval warm-up checklist. 88/88 tests pass. |
+| 6 - ZAP Active Scan Bridge & Nikto Classification | Complete | Phase 12 T047-T051 complete: loopback host alias resolution (127.0.0.1 <-> localhost) in ZAP adapter, scheme wildcard validation in SQLite approval verification, console diagnostics on execution failure, and OWASP WSTG/ASVS CWE/CVSS classification for Nikto findings. 92/92 tests pass. |
 
 ## Implemented features
 
