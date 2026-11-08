@@ -216,3 +216,95 @@ def test_provider_slots_picks_up_live_dotenv_changes_without_polluting_os_enviro
 
     # Confirm absolutely no PROVIDER_* keys were written into os.environ
     assert [k for k in os.environ if k.startswith("PROVIDER_")] == []
+
+
+def test_llm_markdown_fenced_json_is_parsed_and_supports_nikto(tmp_path: Path):
+    repository, context = scope_context(tmp_path)
+    # LLM returning JSON inside markdown code fences
+    llm_output = """```json
+{
+  "tool": "nikto",
+  "profile": "web_quick",
+  "target": "lab.example",
+  "port": 80,
+  "rationale": "Investigate web server configuration and misconfigurations."
+}
+```"""
+    outcome = propose_and_gate(
+        repository,
+        context,
+        slots=[slot(1)],
+        client=StaticClient(llm_output),
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    assert outcome.status == ProposalStatus.APPROVED
+    assert outcome.source == "provider_1"
+    assert outcome.proposal.tool.value == "nikto"
+    assert outcome.proposal.profile.value == "web_quick"
+    assert outcome.proposal.port == 80
+
+
+def test_deterministic_fallback_selects_nikto_for_web_request(tmp_path: Path):
+    repository, _ = scope_context(tmp_path)
+    web_context = ProposalContext(
+        scope=register_scope(
+            repository,
+            ScopeRegistration(
+                target="127.0.0.1",
+                allowed_ports="3000",
+                engagement_note="Lab",
+                authorized_lab_attested=True,
+            ),
+        ),
+        request="Scan the web application for vulnerabilities and misconfigurations.",
+    )
+    outcome = propose_and_gate(
+        repository,
+        web_context,
+        slots=[slot(1)],
+        client=FailingClient(),
+        rate_limit_check=lambda *_: RateLimitDecision(True, "ok", 0),
+    )
+    assert outcome.status == ProposalStatus.APPROVED
+    assert outcome.source == "deterministic_fallback"
+    assert outcome.proposal.tool.value == "nikto"
+    assert outcome.proposal.port == 3000
+
+
+def test_rate_limiter_allows_different_tools_sequentially(tmp_path: Path):
+    limiter = InMemoryRateLimiter(window_seconds=10)
+    scope = register_scope(
+        Repository(tmp_path / "repo.db"),
+        ScopeRegistration(
+            target="127.0.0.1",
+            allowed_ports="3000",
+            engagement_note="Lab",
+            authorized_lab_attested=True,
+        ),
+    )
+    nmap_proposal = PlanProposal(
+        tool="nmap",
+        profile="quick_recon",
+        target="127.0.0.1",
+        port=3000,
+        rationale="Port scan",
+    )
+    nikto_proposal = PlanProposal(
+        tool="nikto",
+        profile="web_quick",
+        target="127.0.0.1",
+        port=3000,
+        rationale="Web scan",
+    )
+
+    # First call for Nmap passes
+    d1 = limiter(scope, nmap_proposal, ActionClass.RECON)
+    assert d1.allowed is True
+
+    # Immediate second call for Nmap is rate-limited
+    d2 = limiter(scope, nmap_proposal, ActionClass.RECON)
+    assert d2.allowed is False
+
+    # But call for Nikto on the same target and port passes immediately!
+    d3 = limiter(scope, nikto_proposal, ActionClass.RECON)
+    assert d3.allowed is True

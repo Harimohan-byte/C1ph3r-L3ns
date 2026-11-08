@@ -30,7 +30,7 @@ from cipher_lens.ui.mono import friendly_validation_message, heading, inline_err
 # ---------------------------------------------------------------------------
 def _session_rate_limiter() -> InMemoryRateLimiter:
     if "rate_limiter" not in st.session_state:
-        st.session_state.rate_limiter = InMemoryRateLimiter()
+        st.session_state.rate_limiter = InMemoryRateLimiter(window_seconds=10)
     return st.session_state.rate_limiter
 
 
@@ -373,6 +373,9 @@ def render(repository: Repository) -> None:
         if not analyst_request or not analyst_request.strip():
             inline_error("Please describe your assessment objective before proposing a step.")
         else:
+            print(f"\n[CIPHER LENS UI] >>> 'Propose Next Assessment Step' clicked.", flush=True)
+            print(f"[CIPHER LENS UI] Scope: {selected.primary_target} (ID: {selected.id[:8]}...)", flush=True)
+            print(f"[CIPHER LENS UI] Objective: '{analyst_request.strip()}'", flush=True)
             st.session_state["saved_assessment_objective"] = analyst_request.strip()
             st.session_state["last_proposal_executed"] = False
             evidence_summary = _evidence_summary(repository, selected.id)
@@ -390,7 +393,9 @@ def render(repository: Repository) -> None:
                     )
                     st.session_state.last_proposal = outcome
                     st.session_state.last_proposal_scope_id = selected.id
+                    print(f"[CIPHER LENS UI] Proposal outcome generated: status={outcome.status.value}, source={getattr(outcome, 'source', 'ai')}", flush=True)
                 except Exception as exc:
+                    print(f"[CIPHER LENS UI] Proposal generation failed: {exc}", flush=True)
                     st.error(f"Proposal generation failed: {exc}")
                     st.session_state.pop("last_proposal", None)
 
@@ -415,6 +420,8 @@ def render(repository: Repository) -> None:
         elif outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
             st.write("")
             if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):
+                print(f"\n[CIPHER LENS UI] >>> 'Execute Proposed Scan' clicked by user.", flush=True)
+                print(f"[CIPHER LENS UI] Tool: {outcome.proposal.tool.value} | Profile: {outcome.proposal.profile.value} | Target: {outcome.proposal.target}", flush=True)
                 artifact_dir = data_directory() / "artifacts" / selected.id
                 adapter_context = AdapterContext(
                     repository=repository,
@@ -426,6 +433,7 @@ def render(repository: Repository) -> None:
                 run_id, msg = _execute_and_collect_scan(
                     repository, selected, outcome.proposal, adapter_context
                 )
+                print(f"[CIPHER LENS UI] Execution finished: run_id={run_id}, result='{msg}'", flush=True)
                 if run_id:
                     st.session_state["last_proposal_executed"] = True
                     st.session_state["last_scan_msg"] = msg
@@ -450,24 +458,39 @@ def render(repository: Repository) -> None:
             unsafe_allow_html=True,
         )
     else:
-        # Severity metrics summary
-        c1, c2, c3, c4, c5 = st.columns(5)
+        # Severity metrics summary Bento Grid
         sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Info": 0}
         for f in findings:
             key = f.severity.value.capitalize()
             if key in sev_counts:
                 sev_counts[key] += 1
 
-        with c1:
-            st.metric("Total Findings", len(findings))
-        with c2:
-            st.metric("Critical / High", sev_counts["Critical"] + sev_counts["High"])
-        with c3:
-            st.metric("Medium", sev_counts["Medium"])
-        with c4:
-            st.metric("Low", sev_counts["Low"])
-        with c5:
-            st.metric("Info", sev_counts["Info"])
+        crit_high = sev_counts["Critical"] + sev_counts["High"]
+        bento_metrics_html = f"""
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin: 0.75rem 0 1rem 0;">
+            <div style="background: #0C0F0C; border: 1.5px solid #2D3D1E; border-radius: 10px; padding: 0.65rem 0.85rem; text-align: center;">
+                <span style="color: #6C824E; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block; letter-spacing: 0.05em;">Total Findings</span>
+                <strong style="color: #BBF351; font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 800;">{len(findings)}</strong>
+            </div>
+            <div style="background: #0C0F0C; border: 1.5px solid {'#FF5252' if crit_high > 0 else '#2D3D1E'}; border-radius: 10px; padding: 0.65rem 0.85rem; text-align: center;">
+                <span style="color: {'#FF5252' if crit_high > 0 else '#6C824E'}; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block; letter-spacing: 0.05em;">Critical / High</span>
+                <strong style="color: {'#FF5252' if crit_high > 0 else '#8E928A'}; font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 800;">{crit_high}</strong>
+            </div>
+            <div style="background: #0C0F0C; border: 1.5px solid {'#FFA726' if sev_counts['Medium'] > 0 else '#2D3D1E'}; border-radius: 10px; padding: 0.65rem 0.85rem; text-align: center;">
+                <span style="color: {'#FFA726' if sev_counts['Medium'] > 0 else '#6C824E'}; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block; letter-spacing: 0.05em;">Medium</span>
+                <strong style="color: {'#FFA726' if sev_counts['Medium'] > 0 else '#8E928A'}; font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 800;">{sev_counts['Medium']}</strong>
+            </div>
+            <div style="background: #0C0F0C; border: 1.5px solid {'#FFD54F' if sev_counts['Low'] > 0 else '#2D3D1E'}; border-radius: 10px; padding: 0.65rem 0.85rem; text-align: center;">
+                <span style="color: {'#FFD54F' if sev_counts['Low'] > 0 else '#6C824E'}; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block; letter-spacing: 0.05em;">Low</span>
+                <strong style="color: {'#FFD54F' if sev_counts['Low'] > 0 else '#8E928A'}; font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 800;">{sev_counts['Low']}</strong>
+            </div>
+            <div style="background: #0C0F0C; border: 1.5px solid {'#42A5F5' if sev_counts['Info'] > 0 else '#2D3D1E'}; border-radius: 10px; padding: 0.65rem 0.85rem; text-align: center;">
+                <span style="color: {'#42A5F5' if sev_counts['Info'] > 0 else '#6C824E'}; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block; letter-spacing: 0.05em;">Info</span>
+                <strong style="color: {'#42A5F5' if sev_counts['Info'] > 0 else '#8E928A'}; font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 800;">{sev_counts['Info']}</strong>
+            </div>
+        </div>
+        """
+        st.markdown(bento_metrics_html, unsafe_allow_html=True)
 
         for idx, f in enumerate(findings, start=1):
             with st.container(border=True):

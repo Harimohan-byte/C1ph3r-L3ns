@@ -25,7 +25,7 @@ class _ZapRun:
 
 class ZapAdapter(ToolAdapter):
     tool_name = "zap"
-    allowed_profiles = frozenset({"quick_recon"})
+    allowed_profiles = frozenset({"quick_recon", "web_quick", "active_scan", "spider"})
     requires_approval = True
 
     def validate(self, context: AdapterContext, request: AdapterRequest):

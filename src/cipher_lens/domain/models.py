@@ -28,6 +28,8 @@ class ActionClass(StrEnum):
 
 class ToolName(StrEnum):
     NMAP = "nmap"
+    NIKTO = "nikto"
+    ZAP = "zap"
 
 
 class ScanProfile(StrEnum):
@@ -36,6 +38,9 @@ class ScanProfile(StrEnum):
     TARGETED_PORT_SCAN = "targeted_port_scan"
     FULL_PORT_SCAN = "full_port_scan"
     OS_DETECTION = "os_detection"
+    WEB_QUICK = "web_quick"
+    ACTIVE_SCAN = "active_scan"
+    SPIDER = "spider"
 
 
 class AnticipatedNextStep(BaseModel):

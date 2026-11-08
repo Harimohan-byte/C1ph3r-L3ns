@@ -15,7 +15,7 @@ from cipher_lens.services.audit import record
 
 class NiktoAdapter(ToolAdapter):
     tool_name = "nikto"
-    allowed_profiles = frozenset({"quick_recon"})
+    allowed_profiles = frozenset({"quick_recon", "web_quick"})
 
     def __init__(self) -> None:
         self._runs: dict[str, tuple[subprocess.Popen[bytes], Path, float]] = {}

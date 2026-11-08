@@ -26,6 +26,17 @@ NMAP_PROFILES = tuple(profile.value for profile in ScanProfile)
 SCHEMA_ATTEMPT_CAP = 2
 RATE_LIMIT_WINDOW_SECONDS = 45
 
+ALLOWED_PROFILES_BY_TOOL: dict[str, set[str]] = {
+    "nmap": {p.value for p in ScanProfile},
+    "nikto": {ScanProfile.QUICK_RECON.value, ScanProfile.WEB_QUICK.value},
+    "zap": {
+        ScanProfile.QUICK_RECON.value,
+        ScanProfile.WEB_QUICK.value,
+        ScanProfile.ACTIVE_SCAN.value,
+        ScanProfile.SPIDER.value,
+    },
+}
+
 
 class ProviderFailure(RuntimeError):
     """A safe description of why a provider response cannot be used."""
@@ -55,17 +66,22 @@ class RateLimitDecision:
 
 @dataclass
 class InMemoryRateLimiter:
-    """MVP request throttle keyed by the normalized target and action class."""
+    """MVP request throttle keyed by normalized target, tool name, and action class."""
 
     window_seconds: int = RATE_LIMIT_WINDOW_SECONDS
     clock: Callable[[], float] = time.monotonic
-    _last_requests: dict[tuple[str, ActionClass], float] = field(default_factory=dict, init=False)
+    _last_requests: dict[tuple[str, str, ActionClass], float] = field(default_factory=dict, init=False)
 
     def __call__(
         self, scope: ScopeRecord, proposal: PlanProposal, action: ActionClass
     ) -> RateLimitDecision:
         target = normalize_target(proposal.target)
-        key = (target, action)
+        tool_attr = getattr(proposal, "tool", None)
+        if tool_attr is not None:
+            tool_name = tool_attr.value if hasattr(tool_attr, "value") else str(tool_attr)
+        else:
+            tool_name = "default"
+        key = (target, tool_name, action)
         now = self.clock()
         previous = self._last_requests.get(key)
         if previous is None or now - previous >= self.window_seconds:
@@ -73,9 +89,10 @@ class InMemoryRateLimiter:
             return RateLimitDecision(True, "Rate limit check passed.", 0)
         elapsed = max(0, int(now - previous))
         remaining = max(1, math.ceil(self.window_seconds - (now - previous)))
+        port_val = getattr(proposal, "port", None) or "any"
         return RateLimitDecision(
             False,
-            f"Rate limit: a request for {target}/{proposal.port} ({action.value}) was already made "
+            f"Rate limit: a request for {target}/{port_val} ({action.value}) was already made "
             f"{elapsed}s ago; wait {remaining}s.",
             remaining,
             elapsed,
@@ -130,16 +147,42 @@ class OpenAICompatibleClient:
         return content
 
 
+def _clean_json_content(raw: str) -> str:
+    """Strip markdown code block fences and surrounding non-JSON commentary."""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start : end + 1]
+    return text
+
+
 def _messages(context: ProposalContext) -> list[dict[str, str]]:
-    profiles = ", ".join(NMAP_PROFILES)
     system = (
-        "Return only one JSON object matching this exact schema: "
-        '{"tool":"nmap","profile":"one named profile","target":"IPv4 or hostname",'
+        "You are an expert, authorized VAPT security planner for authorized lab targets.\n"
+        "Select the next single assessment step based on the analyst request, scope, and discovered evidence.\n\n"
+        "Return ONLY one JSON object matching this exact schema:\n"
+        '{"tool":"nmap|nikto|zap","profile":"named_profile","target":"IPv4 or hostname",'
         '"port":integer,"rationale":"evidence-grounded reason",'
-        '"anticipated_next_steps":[{"tool":"nmap","profile":"named profile",'
-        '"rationale":"non-binding preview"}]}. '
-        f"Allowed profiles: {profiles}. Do not provide flags, arguments, CVEs, CVSS, severity, or findings. "
-        "The preview is non-executable and may contain at most three entries."
+        '"anticipated_next_steps":[{"tool":"nmap|nikto|zap","profile":"named_profile",'
+        '"rationale":"non-binding preview"}]}\n\n'
+        "Allowed tools and profiles:\n"
+        "- nmap: quick_recon, service_version_scan, targeted_port_scan, full_port_scan, os_detection\n"
+        "- nikto: web_quick, quick_recon\n"
+        "- zap: web_quick, quick_recon, spider, active_scan\n\n"
+        "Guidelines:\n"
+        "1. For initial port discovery or general recon, choose tool 'nmap'.\n"
+        "2. When web services (HTTP, HTTPS, port 80, 443, 3000, 8080) are already discovered or requested, choose tool 'nikto' (profile 'web_quick').\n"
+        "3. When the analyst requests web application testing or active scanning, choose tool 'zap'.\n"
+        "4. target and port must strictly match the authorized scope.\n"
+        "5. Output raw JSON only with no markdown fences."
     )
     user = (
         f"Authorized scope target: {context.scope.canonical_target}\n"
@@ -153,8 +196,9 @@ def _messages(context: ProposalContext) -> list[dict[str, str]]:
 
 
 def _parse_provider_proposal(raw: str) -> PlanProposal:
+    cleaned = _clean_json_content(raw)
     try:
-        return PlanProposal.model_validate_json(raw)
+        return PlanProposal.model_validate_json(cleaned)
     except PydanticValidationError as error:
         raise ProviderFailure("schema_rejection") from error
 
@@ -179,10 +223,36 @@ def _first_permitted_port(scope: ScopeRecord) -> int | None:
 
 
 def deterministic_fallback(context: ProposalContext) -> PlanProposal:
-    """Safe local proposal used only after all configured providers are unusable."""
+    """Safe local proposal used when configured AI providers are unavailable."""
     port = _first_permitted_port(context.scope)
     if port is None:
         raise ProviderFailure("no_permitted_port_for_local_fallback")
+
+    req = context.request.lower()
+    ev = context.evidence_summary.lower()
+
+    # If the analyst asks for web / nikto scanning or HTTP was already discovered:
+    if any(k in req for k in ["nikto", "web", "http", "header", "misconfig", "juice"]) or (
+        "http" in ev or "open" in ev
+    ):
+        return PlanProposal(
+            tool="nikto",
+            profile="web_quick",
+            target=context.scope.canonical_target,
+            port=port,
+            rationale="Discovered HTTP service or web assessment objective indicates web server inspection using Nikto.",
+        )
+
+    # If the analyst asks for ZAP / active scanning / spider:
+    if any(k in req for k in ["zap", "spider", "active", "api"]):
+        return PlanProposal(
+            tool="zap",
+            profile="quick_recon",
+            target=context.scope.canonical_target,
+            port=port,
+            rationale="Analyst requested web application vulnerability scan using OWASP ZAP.",
+        )
+
     return PlanProposal(
         tool="nmap",
         profile="quick_recon",
@@ -212,7 +282,12 @@ def generate_proposal(
     """Try configured providers in order, auditing every safe failover, then use local fallback."""
     active_slots = list(provider_slots() if slots is None else slots)
     completion_client = client or OpenAICompatibleClient()
+
+    slot_labels = [s.label for s in active_slots]
+    print(f"\n[CIPHER LENS AI] Active provider slots: {slot_labels or '(None configured — local fallback will be used)'}", flush=True)
+
     for slot in active_slots:
+        print(f"[CIPHER LENS AI] Calling {slot.label} (model: {slot.model}) at {slot.base_url}…", flush=True)
         messages = _messages(context)
         for attempt in range(1, SCHEMA_ATTEMPT_CAP + 1):
             try:
@@ -223,8 +298,12 @@ def generate_proposal(
                     entity_type="plan_proposal",
                     detail={"source": slot.label, "attempt": attempt},
                 )
-                proposal = _parse_provider_proposal(completion_client.complete(slot, messages))
+                raw = completion_client.complete(slot, messages)
+                print(f"[CIPHER LENS AI] Response received from {slot.label} ({len(raw)} chars)", flush=True)
+                proposal = _parse_provider_proposal(raw)
+                print(f"[CIPHER LENS AI] ✓ LLM proposal accepted: Tool={proposal.tool.value.upper()}, Profile={proposal.profile.value}, Target={proposal.target}:{proposal.port}", flush=True)
             except ProviderFailure as error:
+                print(f"[CIPHER LENS AI] Provider failure on {slot.label} (attempt {attempt}): {error.reason}", flush=True)
                 if error.reason == "schema_rejection" and attempt < SCHEMA_ATTEMPT_CAP:
                     record(
                         repository,
@@ -246,6 +325,7 @@ def generate_proposal(
             )
             return proposal, slot.label
 
+    print("[CIPHER LENS AI] Using local deterministic planner...", flush=True)
     try:
         proposal = deterministic_fallback(context)
     except ProviderFailure as error:
@@ -258,6 +338,7 @@ def generate_proposal(
         entity_type="plan_proposal",
         detail={"source": "deterministic_fallback"},
     )
+    print(f"[CIPHER LENS AI] ✓ Deterministic proposal: Tool={proposal.tool.value.upper()}, Profile={proposal.profile.value}, Target={proposal.target}:{proposal.port}", flush=True)
     return proposal, "deterministic_fallback"
 
 
@@ -290,8 +371,9 @@ def gate_proposal(
     allowed, reason = is_in_scope(context.scope, proposal.target, proposal.port, action)
     if not allowed:
         return _rejected(repository, proposal, source, reason, "scope_check")
-    if proposal.profile.value not in NMAP_PROFILES:
-        return _rejected(repository, proposal, source, "Profile is not allow-listed.", "profile_allowlist")
+    allowed_profiles = ALLOWED_PROFILES_BY_TOOL.get(proposal.tool.value, set())
+    if proposal.profile.value not in allowed_profiles:
+        return _rejected(repository, proposal, source, f"Profile '{proposal.profile.value}' is not allow-listed for {proposal.tool.value}.", "profile_allowlist")
     rate_decision = (rate_limit_check or _default_rate_limiter)(context.scope, proposal, action)
     record(
         repository,
@@ -310,6 +392,7 @@ def gate_proposal(
         },
     )
     if not rate_decision.allowed:
+        print(f"[CIPHER LENS GATE] Rate limit check: BLOCKED — {rate_decision.reason}", flush=True)
         return _blocked(repository, proposal, source, rate_decision.reason)
     if action == ActionClass.ACTIVE_VALIDATION:
         status = ProposalStatus.AWAITING_APPROVAL
@@ -317,6 +400,7 @@ def gate_proposal(
     else:
         status = ProposalStatus.APPROVED
         reason = "Schema, scope, profile, and rate-limit gates passed."
+    print(f"[CIPHER LENS GATE] Gate check for {proposal.tool.value.upper()} on {proposal.target}:{proposal.port} ({action.value}): {status.value.upper()}", flush=True)
     record(
         repository,
         event_type="proposal_gate",
@@ -361,6 +445,11 @@ def propose_and_gate(
     rate_limit_check: RateLimitCheck | None = None,
 ) -> ProposalOutcome:
     proposal, source = generate_proposal(repository, context, slots=slots, client=client)
+    effective_action = action
+    if proposal.tool.value == "zap" and proposal.profile.value == "active_scan":
+        effective_action = ActionClass.ACTIVE_VALIDATION
+    elif proposal.profile == ScanProfile.OS_DETECTION:
+        effective_action = ActionClass.ACTIVE_VALIDATION
     return gate_proposal(
-        repository, context, proposal, source, action=action, rate_limit_check=rate_limit_check
+        repository, context, proposal, source, action=effective_action, rate_limit_check=rate_limit_check
     )
