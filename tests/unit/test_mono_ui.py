@@ -52,3 +52,4 @@ def test_heading_renders_card_with_background_image():
         assert "Test Kicker" in rendered
         assert "Test Title" in rendered
         assert "background-image: url('data:image/png;base64," in rendered
+

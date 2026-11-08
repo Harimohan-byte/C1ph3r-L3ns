@@ -1,4 +1,4 @@
-"""Assessment workspace: AI-driven adaptive planning, scan execution, and live status."""
+"""Assessment workspace: AI-driven adaptive planning, scan execution, and live findings."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import streamlit as st
 from cipher_lens.adapters.base import (
     AdapterContext,
     AdapterRequest,
+    RunHandle,
     ScanRunStatus,
 )
 from cipher_lens.adapters.nmap import NmapAdapter
@@ -135,19 +136,25 @@ def _render_proposal_outcome(outcome, source: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Execute a scan step from an approved proposal
+# Execute and poll a scan synchronously with user feedback
 # ---------------------------------------------------------------------------
-def _execute_approved_proposal(repository: Repository, scope, proposal, context: AdapterContext) -> str | None:
+def _execute_and_collect_scan(
+    repository: Repository,
+    scope,
+    proposal,
+    context: AdapterContext,
+) -> tuple[str | None, str | None]:
     """
-    Validate and start the adapter for an approved recon proposal.
-    Returns run_id on success, None on failure. Displays status to the user.
+    Validate, start, poll, and parse the adapter for an approved proposal.
+    Waits for the scan to finish (up to 45s), automatically parses findings,
+    and returns (run_id, summary_message).
     """
     adapters = _session_adapters()
     tool_name = proposal.tool.value
     adapter = adapters.get(tool_name)
     if adapter is None:
         st.error(f"No adapter registered for tool: {tool_name}")
-        return None
+        return None, None
 
     request = AdapterRequest(
         target=proposal.target,
@@ -167,19 +174,93 @@ def _execute_approved_proposal(repository: Repository, scope, proposal, context:
             "Active validation requires explicit human approval. "
             "Submit an approval request in the **Audit trail & approvals** workspace, then return here."
         )
-        return None
+        return None, None
     if validated.status in {ScanRunStatus.BLOCKED, ScanRunStatus.FAILED}:
         st.error(f"Validation blocked: {validated.reason}")
-        return None
+        return None, None
 
-    handle = adapter.start(context, validated)
+    with st.spinner(f"Executing {tool_name.upper()} ({proposal.profile.value}) on {proposal.target}:{proposal.port}…"):
+        handle = adapter.start(context, validated)
+        if handle.status == ScanRunStatus.FAILED:
+            st.error(f"Scan could not start: {handle.reason}")
+            return None, None
 
-    if handle.status == ScanRunStatus.FAILED:
-        st.error(f"Scan could not start: {handle.reason}")
-        return None
+        # Poll every 0.5s up to 45s for recon scan completion
+        deadline = time.monotonic() + 45.0
+        poll_res = None
+        while time.monotonic() < deadline:
+            poll_res = adapter.poll(context, handle)
+            if poll_res.status != ScanRunStatus.RUNNING:
+                break
+            time.sleep(0.5)
 
-    st.success(f"✓ {tool_name.upper()} scan started — run ID: `{handle.run_id}`")
-    return handle.run_id
+        if poll_res is None or poll_res.status == ScanRunStatus.RUNNING:
+            st.warning(f"Scan `{handle.run_id}` is taking longer than expected. It is still processing.")
+            return handle.run_id, None
+
+        if poll_res.status == ScanRunStatus.FAILED:
+            st.error(f"Scan failed: {poll_res.reason or 'Tool execution error.'}")
+            return handle.run_id, None
+
+        # Status is PARSING — read raw output and parse findings
+        if poll_res.status == ScanRunStatus.PARSING:
+            output_path: Path | None = None
+            if hasattr(adapter, "_runs") and handle.run_id in adapter._runs:
+                output_path = adapter._runs[handle.run_id][1]
+
+            if output_path and output_path.exists():
+                raw = output_path.read_bytes()
+                parse_result = adapter.parse(context, handle, raw)
+                if parse_result.findings:
+                    ingest_and_store_findings(repository, scope.id, parse_result.findings)
+                    msg = (
+                        f"✓ {tool_name.upper()} scan completed successfully: "
+                        f"{len(parse_result.findings)} finding(s) discovered and correlated below."
+                    )
+                else:
+                    msg = f"✓ {tool_name.upper()} scan completed successfully: target port {proposal.port} responded with no vulnerabilities."
+                return handle.run_id, msg
+
+        return handle.run_id, f"✓ {tool_name.upper()} scan completed."
+
+
+# ---------------------------------------------------------------------------
+# Auto-recover orphaned running scans
+# ---------------------------------------------------------------------------
+def _recover_orphaned_scans(repository: Repository, scope_id: str) -> None:
+    """Recover any scans left in running state by a prior interrupted session."""
+    runs = repository.list_scan_runs(scope_id)
+    running_runs = [r for r in runs if r.status in {"running", "parsing"}]
+    if not running_runs:
+        return
+
+    adapters = _session_adapters()
+    artifact_dir = data_directory() / "artifacts" / scope_id
+
+    for r in running_runs:
+        adapter = adapters.get(r.tool)
+        output_file = artifact_dir / f"{r.id}.xml"
+        if not output_file.exists():
+            output_file = artifact_dir / f"{r.id}.json"
+
+        # If output file exists, attempt parsing
+        if output_file.exists() and output_file.stat().st_size > 0 and adapter:
+            try:
+                raw = output_file.read_bytes()
+                ctx = AdapterContext(
+                    repository=repository,
+                    scope=next(s for s in repository.list_scopes() if s.id == scope_id),
+                    artifact_directory=artifact_dir,
+                    rate_limiter=_session_rate_limiter(),
+                )
+                parse_result = adapter.parse(ctx, RunHandle(r.id, ScanRunStatus.PARSING), raw)
+                if parse_result.findings:
+                    ingest_and_store_findings(repository, scope_id, parse_result.findings)
+            except Exception:
+                repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Could not parse artifact.")
+        else:
+            # Mark as failed so it does not hang forever in running status
+            repository.update_scan_run(r.id, ScanRunStatus.FAILED.value, "Scan process was interrupted by page reload.")
 
 
 # ---------------------------------------------------------------------------
@@ -187,20 +268,19 @@ def _execute_approved_proposal(repository: Repository, scope, proposal, context:
 # ---------------------------------------------------------------------------
 def _evidence_summary(repository: Repository, scope_id: str) -> str:
     runs = repository.list_scan_runs(scope_id)
-    if not runs:
+    findings = repository.list_findings(scope_id=scope_id)
+    if not runs and not findings:
         return "No tool evidence has been collected yet."
     lines: list[str] = []
+    if findings:
+        lines.append("Discovered Findings:")
+        for f in findings[:6]:
+            lines.append(f"- {f.canonical_title} on {f.affected_asset} ({f.severity.value})")
     done_runs = [r for r in runs if r.status in {"done", "parsing"}]
-    if not done_runs:
-        in_flight = [r for r in runs if r.status in {"running", "queued"}]
-        if in_flight:
-            return f"{len(in_flight)} scan(s) currently in progress; no parsed evidence yet."
-        failed = [r for r in runs if r.status == "failed"]
-        return f"{len(failed)} scan(s) failed — no usable evidence collected yet."
-    for run in done_runs[-5:]:  # most recent 5 completed runs
-        lines.append(
-            f"- {run.tool.upper()} {run.profile} on {run.target}:{run.port if hasattr(run, 'port') else ''} → {run.status}"
-        )
+    if done_runs:
+        lines.append("Completed Scans:")
+        for run in done_runs[-4:]:
+            lines.append(f"- {run.tool.upper()} {run.profile} on {run.target} → {run.status}")
     return "\n".join(lines) if lines else "Prior runs completed but no evidence details available."
 
 
@@ -208,7 +288,7 @@ def _evidence_summary(repository: Repository, scope_id: str) -> str:
 # Main page renderer
 # ---------------------------------------------------------------------------
 def render(repository: Repository) -> None:
-    """Render the interactive AI planning panel and the read-only activity timeline."""
+    """Render the interactive AI planning panel, live findings, and activity timeline."""
     heading(
         "Assessment workspace",
         "AI-driven assessment",
@@ -232,6 +312,9 @@ def render(repository: Repository) -> None:
         key="assessment_scope_select",
     )
 
+    # Recover any orphaned scans from previous reloads
+    _recover_orphaned_scans(repository, selected.id)
+
     # -------------------------------------------------------------------
     # Section 1: AI Planner
     # -------------------------------------------------------------------
@@ -248,9 +331,13 @@ def render(repository: Repository) -> None:
             "`PROVIDER_1_MODEL` in your `.env` file and restart the application."
         )
 
+    # Persistent text area: keeps value across page navigation
+    saved_obj = st.session_state.get("saved_assessment_objective", "")
+
     with st.form("ai-planner-form", clear_on_submit=False):
         analyst_request = st.text_area(
             "Assessment objective (natural language)",
+            value=saved_obj,
             placeholder=(
                 "Examples:\n"
                 "• Perform initial port and service discovery on the web application\n"
@@ -266,6 +353,8 @@ def render(repository: Repository) -> None:
         if not analyst_request or not analyst_request.strip():
             inline_error("Please describe your assessment objective before proposing a step.")
         else:
+            st.session_state["saved_assessment_objective"] = analyst_request.strip()
+            st.session_state["last_proposal_executed"] = False
             evidence_summary = _evidence_summary(repository, selected.id)
             context = ProposalContext(
                 scope=selected,
@@ -294,7 +383,15 @@ def render(repository: Repository) -> None:
         st.subheader("📋 AI Proposal")
         _render_proposal_outcome(outcome, getattr(outcome, "source", "ai"))
 
-        if outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
+        is_executed = st.session_state.get("last_proposal_executed", False)
+        scan_msg = st.session_state.get("last_scan_msg")
+
+        if is_executed:
+            if scan_msg:
+                st.success(scan_msg)
+            else:
+                st.success("✓ Scan executed successfully. See discovered findings and timeline below.")
+        elif outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
             if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):
                 artifact_dir = data_directory() / "artifacts" / selected.id
                 adapter_context = AdapterContext(
@@ -304,76 +401,71 @@ def render(repository: Repository) -> None:
                     rate_limiter=_session_rate_limiter(),
                     approval_id=None,
                 )
-                run_id = _execute_approved_proposal(
+                run_id, msg = _execute_and_collect_scan(
                     repository, selected, outcome.proposal, adapter_context
                 )
                 if run_id:
-                    # Clear the last proposal so the analyst requests a new step next
-                    st.session_state.pop("last_proposal", None)
-                    st.session_state["last_run_id"] = run_id
-                    time.sleep(0.5)
+                    st.session_state["last_proposal_executed"] = True
+                    st.session_state["last_scan_msg"] = msg
                     st.rerun()
 
         elif outcome.status == ProposalStatus.BLOCKED:
-            remaining = getattr(getattr(outcome, "proposal", None), "port", "")
             st.info(
-                f"This target+action combination was rate-limited. "
-                f"Wait 45 seconds and try again, or adjust your request."
+                "This target+action combination was rate-limited. "
+                "Wait 45 seconds and try again, or adjust your request."
             )
 
     # -------------------------------------------------------------------
-    # Poll the most recently started scan and attempt parse
+    # Section 2: Discovered Findings (Directly on Assessment Page)
     # -------------------------------------------------------------------
-    if "last_run_id" in st.session_state:
-        run_id = st.session_state["last_run_id"]
-        runs = repository.list_scan_runs(selected.id)
-        current_run = next((r for r in runs if r.id == run_id), None)
-        if current_run:
-            if current_run.status in {"queued", "running"}:
-                st.info(f"⏳ Scan `{run_id}` is **{current_run.status}** — refresh to update status.")
-            elif current_run.status == "parsing":
-                # Trigger adapter parse
-                adapters = _session_adapters()
-                tool_name = current_run.tool
-                adapter = adapters.get(tool_name)
-                if adapter and hasattr(adapter, "_runs") and run_id in adapter._runs:
-                    from cipher_lens.adapters.base import RunHandle
-                    artifact_dir = data_directory() / "artifacts" / selected.id
-                    ctx = AdapterContext(
-                        repository=repository,
-                        scope=selected,
-                        artifact_directory=artifact_dir,
-                        rate_limiter=_session_rate_limiter(),
-                    )
-                    handle = RunHandle(run_id, ScanRunStatus.PARSING)
-                    output_path: Path = adapter._runs[run_id][1]
-                    if output_path.exists():
-                        raw = output_path.read_bytes()
-                        parse_result = adapter.parse(ctx, handle, raw)
-                        if parse_result.findings:
-                            ingest_and_store_findings(repository, selected.id, parse_result.findings)
-                            st.success(
-                                f"✓ Scan complete — {len(parse_result.findings)} finding(s) ingested. "
-                                "Request a new step to continue the adaptive assessment."
-                            )
-                        else:
-                            st.info("Scan complete — no open findings found on this target/port.")
-                        st.session_state.pop("last_run_id", None)
-                        st.rerun()
-                else:
-                    st.info(f"Scan `{run_id}` is parsing — refresh to check results.")
-            elif current_run.status == "done":
-                st.success(f"✓ Scan `{run_id}` completed. Request a new step to continue.")
-                st.session_state.pop("last_run_id", None)
-            elif current_run.status == "failed":
-                st.error(f"Scan `{run_id}` failed: {current_run.error_message or 'Unknown error'}")
-                st.session_state.pop("last_run_id", None)
-
     st.divider()
+    st.subheader("🎯 Discovered Assessment Findings")
+    findings = repository.list_findings(scope_id=selected.id)
+    if not findings:
+        st.markdown(
+            '<div class="cl-card">No findings recorded for this scope yet. '
+            'Execute an assessment scan above to inspect findings.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        # Severity metrics summary
+        c1, c2, c3, c4, c5 = st.columns(5)
+        sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Info": 0}
+        for f in findings:
+            key = f.severity.value.capitalize()
+            if key in sev_counts:
+                sev_counts[key] += 1
+
+        with c1:
+            st.metric("Total Findings", len(findings))
+        with c2:
+            st.metric("Critical / High", sev_counts["Critical"] + sev_counts["High"])
+        with c3:
+            st.metric("Medium", sev_counts["Medium"])
+        with c4:
+            st.metric("Low", sev_counts["Low"])
+        with c5:
+            st.metric("Info", sev_counts["Info"])
+
+        for idx, f in enumerate(findings, start=1):
+            with st.container(border=True):
+                st.markdown(
+                    f"**{idx}. {html.escape(f.canonical_title)}** · `{f.affected_asset}` {status_badge(f.severity.value)}",
+                    unsafe_allow_html=True,
+                )
+                st.write(f.description)
+                st.caption(
+                    f"Priority Score: {f.priority_score:.1f}/10.0 · "
+                    f"CVSS: {f.cvss or 'N/A'} · "
+                    f"CVE: {html.escape(f.cve or 'None')} · "
+                    f"Validation: {f.validation_status.value} · "
+                    f"Evidence: {len(f.provenance)} artifact(s)"
+                )
 
     # -------------------------------------------------------------------
-    # Section 2: Activity timeline (read-only)
+    # Section 3: Activity timeline (read-only)
     # -------------------------------------------------------------------
+    st.divider()
     st.subheader("📊 Activity Timeline")
     runs = repository.list_scan_runs(selected.id)
     approvals = repository.list_approvals(selected.id)
