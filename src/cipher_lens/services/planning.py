@@ -243,7 +243,41 @@ def _messages(context: ProposalContext) -> list[dict[str, str]]:
 def _parse_provider_proposal(raw: str) -> PlanProposal:
     cleaned = _clean_json_content(raw)
     try:
-        return PlanProposal.model_validate_json(cleaned)
+        data = json.loads(cleaned)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ProviderFailure("schema_rejection") from error
+
+    if isinstance(data, dict):
+        tool_raw = str(data.get("tool", "")).lower().strip()
+        if "openvas" in tool_raw or "greenbone" in tool_raw:
+            data["tool"] = "openvas"
+        elif "nessus" in tool_raw:
+            data["tool"] = "nessus"
+        elif tool_raw == "nikto":
+            data["tool"] = "nikto"
+        elif tool_raw == "zap":
+            data["tool"] = "zap"
+        elif tool_raw == "nmap":
+            data["tool"] = "nmap"
+
+        prof_raw = str(data.get("profile", "")).lower().strip()
+        if "import" in prof_raw:
+            data["profile"] = "import_report"
+
+        if "anticipated_next_steps" in data and isinstance(data["anticipated_next_steps"], list):
+            for step in data["anticipated_next_steps"]:
+                if isinstance(step, dict):
+                    s_tool = str(step.get("tool", "")).lower().strip()
+                    if "openvas" in s_tool or "greenbone" in s_tool:
+                        step["tool"] = "openvas"
+                    elif "nessus" in s_tool:
+                        step["tool"] = "nessus"
+                    s_prof = str(step.get("profile", "")).lower().strip()
+                    if "import" in s_prof:
+                        step["profile"] = "import_report"
+
+    try:
+        return PlanProposal.model_validate(data)
     except PydanticValidationError as error:
         raise ProviderFailure("schema_rejection") from error
 
@@ -275,6 +309,26 @@ def deterministic_fallback(context: ProposalContext) -> PlanProposal:
 
     req = context.request.lower()
     ev = context.evidence_summary.lower()
+
+    # If the analyst asks for Nessus report import:
+    if "nessus" in req:
+        return PlanProposal(
+            tool="nessus",
+            profile="import_report",
+            target=context.scope.canonical_target,
+            port=port,
+            rationale="Analyst requested Nessus Essentials scan report import.",
+        )
+
+    # If the analyst asks for OpenVAS / Greenbone report import:
+    if any(k in req for k in ["openvas", "greenbone"]):
+        return PlanProposal(
+            tool="openvas",
+            profile="import_report",
+            target=context.scope.canonical_target,
+            port=port,
+            rationale="Analyst requested OpenVAS / Greenbone GMP XML report import.",
+        )
 
     # If the analyst asks for web / nikto scanning or HTTP was already discovered:
     if any(k in req for k in ["nikto", "web", "http", "header", "misconfig", "juice"]) or (
