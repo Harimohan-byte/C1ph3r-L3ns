@@ -21,3 +21,18 @@ graphify-out/
 data/
 reports/
 *.log
+
+# Internal development, task tracking, and agent artifacts (non-client)
+Project-Context.md
+HANDOFF.md
+test.md
+Working.md
+PROBLEM-STATEMENT*
+AGENTS.md
+specs/
+SECREF/
+.agents/
+.codex/
+.specify/
+1.png
+Page-1.png
