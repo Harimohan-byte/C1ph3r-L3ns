@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from uuid import uuid4
@@ -148,6 +149,14 @@ class OpenVASAdapter(ToolAdapter):
             severity = _map_openvas_severity(cvss_val, threat_text)
 
             cve = result.findtext(".//nvt/cve") or result.findtext("cve")
+            if not cve:
+                ref_cve = result.find(".//refs/ref[@type='cve']") or result.find(".//ref[@type='cve']")
+                if ref_cve is not None:
+                    cve = ref_cve.get("id") or ref_cve.text
+            if not cve and description:
+                cve_match = re.search(r"\bCVE-\d{4}-\d{4,7}\b", description, re.IGNORECASE)
+                if cve_match:
+                    cve = cve_match.group(0).upper()
             if cve and cve.lower() in ("nocve", "none"):
                 cve = None
 
@@ -175,3 +184,4 @@ class OpenVASAdapter(ToolAdapter):
             detail={"tool": self.tool_name, "evidence_id": evidence.id, "finding_count": len(findings)},
         )
         return ParseResult(evidence=evidence, findings=findings, status=ScanRunStatus.DONE)
+
