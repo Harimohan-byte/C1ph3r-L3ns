@@ -374,7 +374,7 @@ def render(repository: Repository) -> None:
             inline_error("Please describe your assessment objective before proposing a step.")
         else:
             print(f"\n[CIPHER LENS UI] >>> 'Propose Next Assessment Step' clicked.", flush=True)
-            print(f"[CIPHER LENS UI] Scope: {selected.primary_target} (ID: {selected.id[:8]}...)", flush=True)
+            print(f"[CIPHER LENS UI] Scope: {selected.target} (ID: {selected.id[:8]}...)", flush=True)
             print(f"[CIPHER LENS UI] Objective: '{analyst_request.strip()}'", flush=True)
             st.session_state["saved_assessment_objective"] = analyst_request.strip()
             st.session_state["last_proposal_executed"] = False
