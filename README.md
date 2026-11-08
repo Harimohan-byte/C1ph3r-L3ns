@@ -56,6 +56,7 @@ Configuration variables in `.env`:
 - `PROVIDER_1_BASE_URL` / `PROVIDER_1_API_KEY` / `PROVIDER_1_MODEL`: Primary OpenAI-compatible model provider slot.
 - `PROVIDER_2_BASE_URL` / `PROVIDER_2_API_KEY` / `PROVIDER_2_MODEL`: Secondary model provider slot for auditable failover.
 - `ZAP_BASE_URL`: Base address of the local OWASP ZAP daemon (defaults to `http://127.0.0.1:8080`).
+- `NVD_API_KEY`: Optional NIST NVD API 2.0 key for automated CVE/CVSS enrichment (leave blank for zero-cost operation).
 
 > **Note**: When no model provider slots are configured, CIPHER LENS automatically uses its deterministic, rule-based local planning engine.
 
