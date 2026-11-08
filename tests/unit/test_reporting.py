@@ -160,3 +160,131 @@ def test_report_context_severity_distribution(test_repo: Repository, populated_s
     assert len(context["runs"]) == 2
     assert len(context["approvals"]) == 1
 
+
+def test_resolve_logo_path():
+    """Verify that _resolve_logo_path finds the brand logo file."""
+    from cipher_lens.services.reporting import _resolve_logo_path
+
+    logo_path = _resolve_logo_path()
+    assert logo_path is not None
+    assert logo_path.is_file()
+    assert logo_path.name == "Cipher-Lens-logo-1.png"
+
+
+def test_pdf_report_draws_logo_on_all_pages(test_repo: Repository, populated_scope):
+    """T003: Verify logo is drawn on every page of a multi-page PDF report."""
+    from unittest.mock import patch
+    from reportlab.pdfgen.canvas import Canvas
+    from cipher_lens.services.reporting import LOGO_HEIGHT_PT, LOGO_WIDTH_PT, LOGO_X_PT, LOGO_Y_PT
+
+    draw_calls = []
+    orig_drawImage = Canvas.drawImage
+
+    def tracked_drawImage(self, image, x, y, width=None, height=None, **kwargs):
+        if "Cipher-Lens-logo-1.png" in str(image):
+            draw_calls.append({"x": x, "y": y, "width": width, "height": height})
+        return orig_drawImage(self, image, x, y, width=width, height=height, **kwargs)
+
+    # Seed enough findings to force a multi-page PDF (at least 2 pages)
+    extra_findings = []
+    for i in range(12):
+        extra_findings.append(
+            NormalizedFinding(
+                id=str(uuid4()),
+                canonical_title=f"Synthetic Finding #{i} for multi-page pagination test",
+                affected_asset=f"10.10.10.50:{8000+i}",
+                description="Long description creating sufficient vertical height to require multiple pages.",
+                severity=Severity.LOW,
+                cvss=3.0,
+                cve=None,
+                cwe="CWE-200",
+                confidence="observed",
+                validation_status=ValidationStatus.SUSPECTED,
+                priority_score=3.0,
+                provenance=[],
+                scan_run_id=None,
+            )
+        )
+    test_repo.save_findings(extra_findings)
+
+    with patch.object(Canvas, "drawImage", tracked_drawImage):
+        pdf_bytes = generate_vapt_pdf(test_repo, populated_scope.id)
+
+    assert pdf_bytes.startswith(b"%PDF-")
+    # Must have drawn logo on at least 2 pages
+    assert len(draw_calls) >= 2
+    for call in draw_calls:
+        assert call["x"] == pytest.approx(LOGO_X_PT, 0.1)
+        assert call["y"] == pytest.approx(LOGO_Y_PT, 0.1)
+        assert call["width"] == pytest.approx(LOGO_WIDTH_PT, 0.1)
+        assert call["height"] == pytest.approx(LOGO_HEIGHT_PT, 0.1)
+
+
+def test_interior_page_running_header_and_margin_clearance(test_repo: Repository, populated_scope):
+    """T005: Verify interior pages render running header rule and title with proper clearance."""
+    from unittest.mock import patch
+    from reportlab.pdfgen.canvas import Canvas
+    from cipher_lens.services.reporting import RUNNING_RULE_Y_PT, RUNNING_TEXT_Y_PT
+
+    lines_drawn = []
+    strings_drawn = []
+    orig_line = Canvas.line
+    orig_drawRightString = Canvas.drawRightString
+
+    def tracked_line(self, x1, y1, x2, y2):
+        lines_drawn.append((x1, y1, x2, y2))
+        return orig_line(self, x1, y1, x2, y2)
+
+    def tracked_drawRightString(self, x, y, text):
+        strings_drawn.append((x, y, text))
+        return orig_drawRightString(self, x, y, text)
+
+    # Seed enough findings to force page 2
+    extra_findings = [
+        NormalizedFinding(
+            id=str(uuid4()),
+            canonical_title=f"Finding {i}",
+            affected_asset=f"10.10.10.50:{8000+i}",
+            description="Sample description to ensure multi-page flowable pagination.",
+            severity=Severity.INFO,
+            cvss=1.0,
+            cve=None,
+            cwe=None,
+            confidence="observed",
+            validation_status=ValidationStatus.SUSPECTED,
+            priority_score=1.0,
+            provenance=[],
+            scan_run_id=None,
+        )
+        for i in range(12)
+    ]
+    test_repo.save_findings(extra_findings)
+
+    with patch.object(Canvas, "line", tracked_line), patch.object(Canvas, "drawRightString", tracked_drawRightString):
+        pdf_bytes = generate_vapt_pdf(test_repo, populated_scope.id)
+
+    assert pdf_bytes.startswith(b"%PDF-")
+    # Verify dividing line on interior page
+    divider_calls = [c for c in lines_drawn if c[1] == pytest.approx(RUNNING_RULE_Y_PT, 0.1)]
+    assert len(divider_calls) >= 1
+
+    # Verify running header text on interior page
+    title_calls = [c for c in strings_drawn if "CIPHER LENS · SECURITY ASSESSMENT REPORT" in c[2]]
+    assert len(title_calls) >= 1
+    assert title_calls[0][1] == pytest.approx(RUNNING_TEXT_Y_PT, 0.1)
+
+
+def test_pdf_report_graceful_fallback_when_logo_missing(test_repo: Repository, populated_scope, caplog):
+    """T007: Verify PDF generation succeeds cleanly and logs a warning when logo is missing."""
+    import logging
+    from unittest.mock import patch
+
+    with patch("cipher_lens.services.reporting._resolve_logo_path", return_value=None):
+        with caplog.at_level(logging.WARNING):
+            pdf_bytes = generate_vapt_pdf(test_repo, populated_scope.id)
+
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 2000
+    assert any("logo asset not found" in record.message.lower() for record in caplog.records)
+
+

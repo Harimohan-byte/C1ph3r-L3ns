@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,87 @@ from reportlab.platypus import HRFlowable, KeepTogether, PageBreak, Paragraph, S
 from cipher_lens.domain.findings import NormalizedFinding, Severity
 from cipher_lens.domain.models import ScopeRecord
 from cipher_lens.persistence.repositories import ApprovalSummary, Repository, ScanRunSummary
+
+logger = logging.getLogger(__name__)
+
+# --- Header Branding Dimensions & Tokens ---
+LOGO_HEIGHT_PT: float = 32.0
+LOGO_ASPECT_RATIO: float = 1657.0 / 1442.0  # ~1.149
+LOGO_WIDTH_PT: float = round(LOGO_HEIGHT_PT * LOGO_ASPECT_RATIO, 2)  # 36.77 pt
+LOGO_X_PT: float = 0.6 * inch  # 43.2 pt
+LOGO_Y_PT: float = 742.0  # 792 - 18 - 32
+RUNNING_RULE_Y_PT: float = 736.0
+RUNNING_TEXT_X_PT: float = 612.0 - 0.6 * inch  # 568.8 pt
+RUNNING_TEXT_Y_PT: float = 748.0
+
+
+def _resolve_logo_path() -> Path | None:
+    """Locate the Cipher-Lens application logo from project root or package assets."""
+    candidates = [
+        Path.cwd() / "Cipher-Lens-logo-1.png",
+        Path(__file__).resolve().parent.parent / "ui" / "assets" / "Cipher-Lens-logo-1.png",
+        Path(__file__).resolve().parents[3] / "Cipher-Lens-logo-1.png",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def _draw_first_page(canvas: Any, doc: SimpleDocTemplate) -> None:
+    """Canvas callback to decorate the first page header with the top-left Cipher-Lens logo."""
+    canvas.saveState()
+    logo_path = _resolve_logo_path()
+    if logo_path is not None:
+        try:
+            canvas.drawImage(
+                str(logo_path),
+                LOGO_X_PT,
+                LOGO_Y_PT,
+                width=LOGO_WIDTH_PT,
+                height=LOGO_HEIGHT_PT,
+                mask="auto",
+                preserveAspectRatio=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to render Cipher-Lens logo on first page: %s", exc)
+    else:
+        logger.warning("Cipher-Lens logo asset not found; omitting header logo.")
+    canvas.restoreState()
+
+
+def _draw_later_pages(canvas: Any, doc: SimpleDocTemplate) -> None:
+    """Canvas callback to decorate interior page headers with logo, running title, and divider rule."""
+    canvas.saveState()
+    logo_path = _resolve_logo_path()
+    if logo_path is not None:
+        try:
+            canvas.drawImage(
+                str(logo_path),
+                LOGO_X_PT,
+                LOGO_Y_PT,
+                width=LOGO_WIDTH_PT,
+                height=LOGO_HEIGHT_PT,
+                mask="auto",
+                preserveAspectRatio=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to render Cipher-Lens logo on interior page: %s", exc)
+    else:
+        logger.warning("Cipher-Lens logo asset not found; omitting interior header logo.")
+
+    # Running header text
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.setFillColor(colors.HexColor("#516D18"))
+    canvas.drawRightString(RUNNING_TEXT_X_PT, RUNNING_TEXT_Y_PT, "CIPHER LENS · SECURITY ASSESSMENT REPORT")
+
+    # Dividing rule separating header from content
+    canvas.setStrokeColor(colors.HexColor("#E5D7C0"))
+    canvas.setLineWidth(0.5)
+    canvas.line(LOGO_X_PT, RUNNING_RULE_Y_PT, RUNNING_TEXT_X_PT, RUNNING_RULE_Y_PT)
+
+    canvas.restoreState()
+
 
 
 def build_report_context(repository: Repository, scope_id: str) -> dict[str, Any]:
@@ -85,7 +167,7 @@ def generate_vapt_pdf(
         pagesize=letter,
         leftMargin=0.6 * inch,
         rightMargin=0.6 * inch,
-        topMargin=0.6 * inch,
+        topMargin=0.85 * inch,
         bottomMargin=0.6 * inch,
     )
 
@@ -378,7 +460,7 @@ def generate_vapt_pdf(
         )
     )
 
-    doc.build(elements)
+    doc.build(elements, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
     pdf_bytes = buffer.getvalue()
 
     if output_path is not None:
