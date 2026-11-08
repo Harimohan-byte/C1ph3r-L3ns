@@ -21,6 +21,7 @@ class _ZapRun:
     scan_id: str
     endpoint: str
     deadline: float
+    target_url: str
 
 
 class ZapAdapter(ToolAdapter):
@@ -58,7 +59,7 @@ class ZapAdapter(ToolAdapter):
             scan_id = str(payload["scan"])
         except (KeyError, TypeError, URLError, ValueError):
             return self._fail(context, run_id, "ZAP rejected the requested scan.")
-        self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds)
+        self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds, target_url)
         context.repository.update_scan_run(run_id, ScanRunStatus.RUNNING.value)
         record(context.repository, event_type="adapter_start", outcome="running", entity_type="scan_run", entity_id=run_id,
                detail={"tool": self.tool_name, "target": request.target, "port": request.port, "mode": self._runs[run_id].endpoint})
@@ -77,6 +78,19 @@ class ZapAdapter(ToolAdapter):
             return self._failed_poll(context, handle.run_id, "ZAP status request failed.")
         if not complete:
             return PollResult(handle.run_id, ScanRunStatus.RUNNING)
+
+        # Scan complete — fetch alerts from ZAP REST daemon and save artifact JSON
+        output_path = context.artifact_directory / self.tool_name / f"{handle.run_id}.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            alerts_data = self._json("/JSON/core/view/alerts/", {"baseurl": run.target_url})
+            if not alerts_data.get("alerts"):
+                alerts_data = self._json("/JSON/core/view/alerts/", {})
+            output_path.write_text(json.dumps(alerts_data), encoding="utf-8")
+        except Exception:
+            if not output_path.exists():
+                output_path.write_text(json.dumps({"alerts": []}), encoding="utf-8")
+
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.PARSING.value)
         return PollResult(handle.run_id, ScanRunStatus.PARSING)
 
