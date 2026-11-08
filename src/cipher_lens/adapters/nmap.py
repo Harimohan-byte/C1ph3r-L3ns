@@ -1,14 +1,18 @@
 """Scoped Nmap XML adapter with fixed, non-injectable profile bundles."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from ctypes import windll
-from os import name as operating_system
 from pathlib import Path
 from uuid import uuid4
+
+try:
+    from ctypes import windll
+except ImportError:
+    windll = None  # Non-Windows systems
 
 from cipher_lens.adapters.base import AdapterContext, AdapterRequest, Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ToolAdapter, ValidationResult
 from cipher_lens.services.audit import record
@@ -121,7 +125,9 @@ class NmapAdapter(ToolAdapter):
 
     @staticmethod
     def _has_os_detection_privilege() -> bool:
-        if operating_system != "nt":
+        if os.name != "nt":
+            return os.geteuid() == 0 if hasattr(os, "geteuid") else False
+        if windll is None:
             return False
         try:
             return bool(windll.shell32.IsUserAnAdmin())
