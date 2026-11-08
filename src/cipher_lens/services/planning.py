@@ -36,6 +36,14 @@ ALLOWED_PROFILES_BY_TOOL: dict[str, set[str]] = {
         ScanProfile.ACTIVE_SCAN.value,
         ScanProfile.SPIDER.value,
     },
+    "nessus": {
+        ScanProfile.IMPORT_REPORT.value,
+        ScanProfile.QUICK_RECON.value,
+    },
+    "openvas": {
+        ScanProfile.IMPORT_REPORT.value,
+        ScanProfile.QUICK_RECON.value,
+    },
 }
 
 
@@ -172,8 +180,8 @@ def _seven_tools_prompt_catalog() -> str:
         ("OWASP ZAP", "Live", "Web application and API vulnerability assessment and active scan validation", "Active validation scans strictly require a prior 15-minute human approval token."),
         ("Nikto", "Live", "Web-server configuration, outdated components, and known security issue checks", "Fixed quick_recon and web_quick mode only; tuning and mutation flags not permitted."),
         ("Burp Suite Community", "Import-only", "Web security testing, analyst-assisted validation, and proxy issue ingestion", "Free Community edition provides no automated REST API; manual export and report import supported via Integration Matrix."),
-        ("Nessus", "Import-only", "Comprehensive infrastructure vulnerability scanning and compliance auditing", "Commercial tool; no live daemon claimed; native .nessus XML and CSV export import supported."),
-        ("OpenVAS / Greenbone", "Import-only", "Infrastructure vulnerability assessment, CVE mapping, and cross-tool correlation", "Resource-heavy server daemon; external report import supported without live claim."),
+        ("Nessus", "Import-only", "Comprehensive infrastructure vulnerability scanning and compliance auditing", "Native .nessus XML report import supported via proposal card; no live daemon claimed."),
+        ("OpenVAS / Greenbone", "Import-only", "Infrastructure vulnerability assessment, CVE mapping, and cross-tool correlation", "Greenbone GMP XML report import supported via proposal card; server daemon not automated locally."),
         ("Metasploit", "Planned", "Controlled, lab-only validation and proof-of-concept verification", "Autonomous exploitation is strictly forbidden by Constitution Principle I; lab-only proof validation planned."),
     ]
     lines = []
@@ -181,7 +189,10 @@ def _seven_tools_prompt_catalog() -> str:
         if status == "Live":
             exec_note = f"[Status: {status}] Automated live adapter available. Can be selected as executable proposal 'tool'."
         elif status == "Import-only":
-            exec_note = f"[Status: {status}] Import-only. CANNOT be selected in proposal 'tool' field. If relevant, name it in 'rationale' to advise manual testing and report import via Integration Matrix."
+            if name in ("Nessus", "OpenVAS / Greenbone"):
+                exec_note = f"[Status: {status}] Import-only parser active. Can be proposed with profile 'import_report' to prompt analyst for report upload."
+            else:
+                exec_note = f"[Status: {status}] Import-only. CANNOT be selected in proposal 'tool' field. If relevant, name it in 'rationale' to advise manual testing and report import via Integration Matrix."
         else:
             exec_note = f"[Status: {status}] Planned lab validation. CANNOT be selected in proposal 'tool' field."
         lines.append(f"• {name}: {exec_note} (Role: {role}. Limitations: {lim})")
@@ -195,24 +206,28 @@ def _messages(context: ProposalContext) -> list[dict[str, str]]:
         "Security Tool Catalog & Truthful Integration Statuses:\n"
         f"{_seven_tools_prompt_catalog()}\n\n"
         "CRITICAL EXECUTION GUARDRAIL:\n"
-        "- The executable 'tool' field in your JSON response (and in anticipated_next_steps) MUST ONLY be one of the Live automated tools: 'nmap', 'nikto', or 'zap'.\n"
-        "- Never select an Import-only or Planned tool (Burp Suite, Nessus, OpenVAS, Metasploit) in the executable 'tool' field.\n"
-        "- However, in your 'rationale' and 'anticipated_next_steps' rationale fields, you MAY explicitly cite Import-only tools (e.g. Burp Suite Community for manual repeater/intercept testing, or Nessus/OpenVAS for comprehensive vulnerability imports) to advise the analyst on manual assessment workflows and importing findings through the Integration Matrix.\n\n"
+        "- The 'tool' field in your JSON response (and in anticipated_next_steps) must be one of: 'nmap', 'nikto', 'zap', 'nessus', or 'openvas'.\n"
+        "- For live automated scans, select 'nmap', 'nikto', or 'zap'.\n"
+        "- For infrastructure vulnerability report import, select 'nessus' or 'openvas' with profile 'import_report'.\n"
+        "- Never select Burp Suite or Metasploit in the 'tool' field.\n\n"
         "Return ONLY one JSON object matching this exact schema:\n"
-        '{"tool":"nmap|nikto|zap","profile":"named_profile","target":"IPv4 or hostname",'
+        '{"tool":"nmap|nikto|zap|nessus|openvas","profile":"named_profile","target":"IPv4 or hostname",'
         '"port":integer,"rationale":"evidence-grounded reason",'
-        '"anticipated_next_steps":[{"tool":"nmap|nikto|zap","profile":"named_profile",'
+        '"anticipated_next_steps":[{"tool":"nmap|nikto|zap|nessus|openvas","profile":"named_profile",'
         '"rationale":"non-binding preview"}]}\n\n'
         "Allowed executable tools and profiles:\n"
         "- nmap: quick_recon, service_version_scan, targeted_port_scan, full_port_scan, os_detection\n"
         "- nikto: web_quick, quick_recon\n"
-        "- zap: web_quick, quick_recon, spider, active_scan\n\n"
+        "- zap: web_quick, quick_recon, spider, active_scan\n"
+        "- nessus: import_report, quick_recon\n"
+        "- openvas: import_report, quick_recon\n\n"
         "Guidelines:\n"
         "1. For initial port discovery or general recon, choose tool 'nmap'.\n"
         "2. When web services (HTTP, HTTPS, port 80, 443, 3000, 8080) are already discovered or requested, choose tool 'nikto' (profile 'web_quick').\n"
         "3. When the analyst requests web application testing or active scanning, choose tool 'zap'.\n"
-        "4. target and port must strictly match the authorized scope.\n"
-        "5. Output raw JSON only with no markdown fences."
+        "4. When comprehensive infrastructure report import is requested, choose 'nessus' or 'openvas' (profile 'import_report').\n"
+        "5. target and port must strictly match the authorized scope.\n"
+        "6. Output raw JSON only with no markdown fences."
     )
     user = (
         f"Authorized scope target: {context.scope.canonical_target}\n"

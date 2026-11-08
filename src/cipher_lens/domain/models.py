@@ -30,6 +30,8 @@ class ToolName(StrEnum):
     NMAP = "nmap"
     NIKTO = "nikto"
     ZAP = "zap"
+    NESSUS = "nessus"
+    OPENVAS = "openvas"
 
 
 class ScanProfile(StrEnum):
@@ -41,6 +43,7 @@ class ScanProfile(StrEnum):
     WEB_QUICK = "web_quick"
     ACTIVE_SCAN = "active_scan"
     SPIDER = "spider"
+    IMPORT_REPORT = "import_report"
 
 
 class AnticipatedNextStep(BaseModel):

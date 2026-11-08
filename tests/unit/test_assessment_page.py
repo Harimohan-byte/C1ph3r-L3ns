@@ -205,3 +205,17 @@ def test_execute_and_collect_scan_uses_get_output_path_for_all_adapters(tmp_path
         assert "completed successfully" in (msg or "")
 
 
+def test_session_adapters_includes_nessus_and_openvas():
+    """Verify that _session_adapters registers NessusAdapter and OpenVASAdapter."""
+    from cipher_lens.adapters.nessus import NessusAdapter
+    from cipher_lens.adapters.openvas import OpenVASAdapter
+    from cipher_lens.ui.assessment_page import _session_adapters
+
+    adapters = _session_adapters()
+    assert "nessus" in adapters
+    assert "openvas" in adapters
+    assert isinstance(adapters["nessus"], NessusAdapter)
+    assert isinstance(adapters["openvas"], OpenVASAdapter)
+
+
+

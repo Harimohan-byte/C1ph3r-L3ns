@@ -44,11 +44,13 @@ def test_declared_statuses_truthful_and_honest():
     assert nessus.status == IntegrationStatus.IMPORT_ONLY
     assert ".nessus" in nessus.supported_formats
     assert "no live daemon claimed" in nessus.availability_details.lower()
+    assert "parser active" in nessus.availability_details.lower()
 
     # OpenVAS: Import-only
     openvas = tools["OpenVAS / Greenbone"]
     assert openvas.status == IntegrationStatus.IMPORT_ONLY
     assert ".xml" in openvas.supported_formats
+    assert "parser active" in openvas.availability_details.lower()
 
     # Burp Community: Import-only, honest free-tier disclosure
     burp = tools["Burp Suite Community"]

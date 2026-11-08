@@ -18,6 +18,8 @@ from cipher_lens.adapters.base import (
 from cipher_lens.adapters.nmap import NmapAdapter
 from cipher_lens.adapters.nikto import NiktoAdapter
 from cipher_lens.adapters.zap import ZapAdapter
+from cipher_lens.adapters.nessus import NessusAdapter
+from cipher_lens.adapters.openvas import OpenVASAdapter
 from cipher_lens.config import data_directory
 from cipher_lens.domain.models import ActionClass, ProposalStatus
 from cipher_lens.domain.scope import normalize_target
@@ -43,6 +45,8 @@ def _session_adapters() -> dict[str, object]:
             "nmap": NmapAdapter(),
             "nikto": NiktoAdapter(),
             "zap": ZapAdapter(),
+            "nessus": NessusAdapter(),
+            "openvas": OpenVASAdapter(),
         }
     return st.session_state._adapters
 
@@ -548,36 +552,108 @@ def render(repository: Repository) -> None:
                     icon="ℹ️",
                 )
         elif outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
-            st.write("")
-            if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):
-                print(f"\n[CIPHER LENS UI] >>> 'Execute Proposed Scan' clicked by user.", flush=True)
-                print(f"[CIPHER LENS UI] Tool: {outcome.proposal.tool.value} | Profile: {outcome.proposal.profile.value} | Target: {outcome.proposal.target}", flush=True)
-                artifact_dir = data_directory() / "artifacts" / selected.id
-                # Check for an active approved authorization for this target/port/action
-                matched_approval_id = None
-                approved_records = repository.list_approvals(selected.id, status="approved")
-                for app in approved_records:
-                    if normalize_target(app.target) == normalize_target(outcome.proposal.target) and (
-                        app.port is None or app.port == outcome.proposal.port
-                    ):
-                        matched_approval_id = app.id
-                        break
+            tool_name = outcome.proposal.tool.value
+            is_import_only = tool_name in {"nessus", "openvas"}
 
-                adapter_context = AdapterContext(
-                    repository=repository,
-                    scope=selected,
-                    artifact_directory=artifact_dir,
-                    rate_limiter=_session_rate_limiter(),
-                    approval_id=matched_approval_id,
+            if is_import_only:
+                st.info(
+                    f"ℹ️ **{tool_name.upper()}** has no live execution API in this tier — "
+                    "run it yourself and upload the exported report file below."
                 )
-                run_id, msg = _execute_and_collect_scan(
-                    repository, selected, outcome.proposal, adapter_context
+                uploaded_file = st.file_uploader(
+                    f"Upload {tool_name.upper()} report",
+                    type=["xml", "nessus"],
+                    key=f"report_file_uploader_{tool_name}",
+                    help="Upload native .nessus XML or OpenVAS/Greenbone GMP XML report.",
                 )
-                print(f"[CIPHER LENS UI] Execution finished: run_id={run_id}, result='{msg}'", flush=True)
-                if run_id:
-                    st.session_state["last_proposal_executed"] = True
-                    st.session_state["last_scan_msg"] = msg
-                    st.rerun()
+                if uploaded_file is not None:
+                    if st.button(f"📥 Ingest {tool_name.upper()} Report", type="primary", key="ingest_report_btn"):
+                        file_bytes = uploaded_file.getvalue()
+                        head_sample = file_bytes[:1024].decode("utf-8", errors="ignore")
+                        detected_tool = tool_name
+                        if "<NessusClientData_v2" in head_sample:
+                            detected_tool = "nessus"
+                        elif "<report" in head_sample:
+                            detected_tool = "openvas"
+
+                        adapters = _session_adapters()
+                        adapter = adapters.get(detected_tool)
+                        if adapter is None:
+                            st.error(f"No adapter registered for tool: {detected_tool}")
+                        else:
+                            artifact_dir = data_directory() / "artifacts" / selected.id
+                            adapter_context = AdapterContext(
+                                repository=repository,
+                                scope=selected,
+                                artifact_directory=artifact_dir,
+                                rate_limiter=_session_rate_limiter(),
+                            )
+                            request = AdapterRequest(
+                                target=outcome.proposal.target,
+                                port=outcome.proposal.port,
+                                profile=outcome.proposal.profile.value,
+                                action=ActionClass.RECON,
+                                scheme="https" if outcome.proposal.port in {443, 8443} else "http",
+                                rationale=outcome.proposal.rationale,
+                                anticipated_next_steps=[
+                                    {"tool": step.tool.value, "profile": step.profile.value, "rationale": step.rationale}
+                                    for step in (outcome.proposal.anticipated_next_steps or [])
+                                ],
+                            )
+                            validated = adapter.validate(adapter_context, request)
+                            if validated.status in {ScanRunStatus.BLOCKED, ScanRunStatus.FAILED}:
+                                st.error(f"Validation blocked: {validated.reason}")
+                            else:
+                                handle = adapter.start(adapter_context, validated)
+                                parse_result = adapter.parse(adapter_context, handle, file_bytes)
+                                if parse_result.status == ScanRunStatus.DONE:
+                                    if parse_result.findings:
+                                        correlated = ingest_and_store_findings(
+                                            repository, handle.run_id, parse_result.findings, parse_result.evidence
+                                        )
+                                        msg = (
+                                            f"✓ {detected_tool.upper()} report ingested successfully: "
+                                            f"{len(parse_result.findings)} finding(s) parsed, {len(correlated)} correlated in database. "
+                                            f"Evidence SHA-256: `{parse_result.evidence.sha256[:12]}…`"
+                                        )
+                                    else:
+                                        msg = f"✓ {detected_tool.upper()} report ingested successfully: no in-scope vulnerabilities detected."
+                                    st.session_state["last_proposal_executed"] = True
+                                    st.session_state["last_scan_msg"] = msg
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to parse report: {parse_result.reason}")
+            else:
+                st.write("")
+                if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):
+                    print(f"\n[CIPHER LENS UI] >>> 'Execute Proposed Scan' clicked by user.", flush=True)
+                    print(f"[CIPHER LENS UI] Tool: {outcome.proposal.tool.value} | Profile: {outcome.proposal.profile.value} | Target: {outcome.proposal.target}", flush=True)
+                    artifact_dir = data_directory() / "artifacts" / selected.id
+                    # Check for an active approved authorization for this target/port/action
+                    matched_approval_id = None
+                    approved_records = repository.list_approvals(selected.id, status="approved")
+                    for app in approved_records:
+                        if normalize_target(app.target) == normalize_target(outcome.proposal.target) and (
+                            app.port is None or app.port == outcome.proposal.port
+                        ):
+                            matched_approval_id = app.id
+                            break
+
+                    adapter_context = AdapterContext(
+                        repository=repository,
+                        scope=selected,
+                        artifact_directory=artifact_dir,
+                        rate_limiter=_session_rate_limiter(),
+                        approval_id=matched_approval_id,
+                    )
+                    run_id, msg = _execute_and_collect_scan(
+                        repository, selected, outcome.proposal, adapter_context
+                    )
+                    print(f"[CIPHER LENS UI] Execution finished: run_id={run_id}, result='{msg}'", flush=True)
+                    if run_id:
+                        st.session_state["last_proposal_executed"] = True
+                        st.session_state["last_scan_msg"] = msg
+                        st.rerun()
 
         elif outcome.status == ProposalStatus.AWAITING_APPROVAL and outcome.proposal is not None:
             st.warning(
