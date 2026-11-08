@@ -40,7 +40,7 @@ def render(repository: Repository) -> None:
         )
         st.caption("Opening assessment status…")
         time.sleep(1.75)
-        st.session_state.workspace = "Assessment status"
+        st.session_state.pending_workspace = "Assessment status"
         del st.session_state["scope_registration_success"]
         st.rerun()
 
