@@ -219,21 +219,41 @@ def _execute_and_collect_scan(
             st.error(f"Scan could not start: {handle.reason}")
             return None, None
 
-        # Poll every 1.0s up to 60s for recon scan completion
-        deadline = time.monotonic() + 60.0
+        # Poll every 1.0s up to 180s for active scans, 60s for recon scans
+        timeout_window = 180.0 if tool_name == "zap" else 60.0
+        deadline = time.monotonic() + timeout_window
         poll_res = None
         poll_count = 0
+        progress_slot = st.empty()
+
         while time.monotonic() < deadline:
             poll_res = adapter.poll(context, handle)
             if poll_res.status != ScanRunStatus.RUNNING:
                 break
             poll_count += 1
-            if poll_count % 5 == 0:
-                print(f"[CIPHER LENS UI] Waiting for {tool_name.upper()}... elapsed: {poll_count}s", flush=True)
+            progress_pct = getattr(poll_res, "progress", 0)
+
+            # Live terminal logging
+            if poll_count % 5 == 0 or (progress_pct > 0 and poll_count % 2 == 0):
+                pct_str = f" ({progress_pct}%)" if progress_pct > 0 else ""
+                print(f"[CIPHER LENS UI] Waiting for {tool_name.upper()}{pct_str}... elapsed: {poll_count}s", flush=True)
+
+            # Live UI progress updates in browser
+            pct_label = f" — {progress_pct}% complete" if progress_pct > 0 else ""
+            progress_slot.info(
+                f"⏳ **Executing {tool_name.upper()} ({proposal.profile.value})** on `{proposal.target}:{proposal.port}`{pct_label} "
+                f"(elapsed: {poll_count}s / max {int(timeout_window)}s)…"
+            )
             time.sleep(1.0)
 
+        progress_slot.empty()
+
         if poll_res is None or poll_res.status == ScanRunStatus.RUNNING:
-            st.warning(f"Scan `{handle.run_id}` is taking longer than expected. It is still processing.")
+            st.info(
+                f"⏳ **{tool_name.upper()} scan `{handle.run_id[:8]}` is executing in the background.** "
+                "Navigating or reloading will not interrupt it; check the status banner above or click 'Refresh Status'.",
+                icon="ℹ️",
+            )
             return handle.run_id, None
 
         if poll_res.status == ScanRunStatus.FAILED:
@@ -388,9 +408,21 @@ def render(repository: Repository) -> None:
         col_ar1, col_ar2 = st.columns([4, 1])
         with col_ar1:
             for ar in active_runs:
+                prog_str = ""
+                adapter = _session_adapters().get(ar.tool)
+                if adapter:
+                    ctx = AdapterContext(
+                        repository=repository,
+                        scope=selected,
+                        artifact_directory=data_directory() / "artifacts" / selected.id,
+                        rate_limiter=_session_rate_limiter(),
+                    )
+                    pres = adapter.poll(ctx, RunHandle(ar.id, ScanRunStatus(ar.status)))
+                    if getattr(pres, "progress", 0) > 0:
+                        prog_str = f" — {pres.progress}% complete"
                 st.info(
-                    f"⏳ **{ar.tool.upper()} scan ({ar.profile}) is executing in the background.** "
-                    f"Navigating or reloading will not interrupt it; click 'Refresh Scan Status' to check if completed.",
+                    f"⏳ **{ar.tool.upper()} scan ({ar.profile}) is executing in the background{prog_str}.** "
+                    f"Navigating or reloading will not interrupt it; click 'Refresh Status' to update progress.",
                     icon="ℹ️",
                 )
         with col_ar2:
@@ -507,7 +539,10 @@ def render(repository: Repository) -> None:
             if scan_msg:
                 st.success(scan_msg)
             else:
-                st.success("✓ Scan executed successfully. See discovered findings and timeline below.")
+                st.info(
+                    "⏳ Scan initiated and running in the background. Monitor live progress above or click 'Refresh Status' to update.",
+                    icon="ℹ️",
+                )
         elif outcome.status == ProposalStatus.APPROVED and outcome.proposal is not None:
             st.write("")
             if st.button("▶ Execute Proposed Scan", type="primary", key="execute_scan_btn"):

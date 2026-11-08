@@ -111,3 +111,10 @@ and the team lead's phase approval. T022 must not start until the Phase 5 clarif
 - [x] T049 [P2] [OBSERVABILITY] Add explicit console failure logging in `_execute_and_collect_scan` in `src/cipher_lens/ui/assessment_page.py` to print exact validation block reasons and adapter start failures to stdout.
 - [x] T050 [P2] [FEATURE] Implement native OWASP/CWE/CVSS vulnerability classification for Nikto findings in `src/cipher_lens/adapters/nikto.py`. Map web misconfigurations (missing security headers X-Frame-Options, CSP, HSTS, cookie secure/HttpOnly flags, info leaks) to respective CWEs, severities (Critical/High/Medium/Low), and CVSS baseline scores per SECREF documentation.
 - [x] T051 [P1] [TEST] Add regression tests for ZAP loopback site-tree alias resolution, scheme wildcard verification in approvals, and Nikto finding severity/CVSS extraction.
+
+## Phase 13: ZAP Background Lifecycle Persistence & Real-Time Progress Visibility
+
+- [x] T052 [P1] [FIX] Add `.meta.json` disk persistence for ZAP scans in `src/cipher_lens/adapters/zap.py` (`artifacts/<scope_id>/zap/<run_id>.meta.json`) recording `scan_id`, `endpoint`, `target_url`, and `deadline_epoch`. Update `poll()` to restore state from disk when in-memory handle is lost across reruns.
+- [x] T053 [P1] [FEATURE] Track real-time ZAP active scan progress percentage (`0%`-`100%`) in `PollResult.progress` and `ZapAdapter.poll()`.
+- [x] T054 [P2] [UI] Extend synchronous scan wait deadline to 180 seconds in `src/cipher_lens/ui/assessment_page.py`, displaying live percentage progress in both terminal logs and UI info banner. Show live progress in the active background scan card with 10-second refresh support.
+- [x] T055 [P1] [TEST] Add unit tests in `tests/unit/test_live_adapters.py` verifying ZAP `.meta.json` disk persistence, re-run recovery, and progress percentage extraction.

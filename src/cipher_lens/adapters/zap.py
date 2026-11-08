@@ -5,6 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 from urllib.error import URLError
 from urllib.parse import urlencode
@@ -85,6 +86,26 @@ class ZapAdapter(ToolAdapter):
                 err_msg = str(exc)
             return self._fail(context, run_id, f"ZAP active scan error: {err_msg}")
         self._runs[run_id] = _ZapRun(scan_id, endpoint.split("/")[2], time.monotonic() + request.timeout_seconds, active_target_url)
+
+        # Persist metadata to disk so ZAP scans survive reloads and background recovery
+        meta_path = context.artifact_directory / self.tool_name / f"{run_id}.meta.json"
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            meta_path.write_text(
+                json.dumps({
+                    "run_id": run_id,
+                    "scan_id": scan_id,
+                    "endpoint": endpoint.split("/")[2],
+                    "target_url": active_target_url,
+                    "deadline_epoch": time.time() + request.timeout_seconds,
+                    "timeout_seconds": request.timeout_seconds,
+                    "started_epoch": time.time(),
+                }),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
         context.repository.update_scan_run(run_id, ScanRunStatus.RUNNING.value)
         record(context.repository, event_type="adapter_start", outcome="running", entity_type="scan_run", entity_id=run_id,
                detail={"tool": self.tool_name, "target": request.target, "port": request.port, "mode": self._runs[run_id].endpoint})
@@ -92,23 +113,47 @@ class ZapAdapter(ToolAdapter):
 
     def poll(self, context: AdapterContext, handle: RunHandle) -> PollResult:
         run = self._runs.get(handle.run_id)
+        scan_id = run.scan_id if run else None
+        endpoint = run.endpoint if run else "ascan"
+        target_url = run.target_url if run else ""
+        deadline_epoch = None
+
         if run is None:
+            # Check persisted .meta.json for background recovery across page reloads
+            meta_path = context.artifact_directory / self.tool_name / f"{handle.run_id}.meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    scan_id = meta.get("scan_id")
+                    endpoint = meta.get("endpoint", "ascan")
+                    target_url = meta.get("target_url", "")
+                    deadline_epoch = meta.get("deadline_epoch")
+                except Exception:
+                    pass
+
+        if not scan_id:
             return PollResult(handle.run_id, handle.status, handle.reason)
-        if time.monotonic() >= run.deadline:
+
+        if run and time.monotonic() >= run.deadline:
             return self._failed_poll(context, handle.run_id, "ZAP timed out.")
+        if deadline_epoch and time.time() >= deadline_epoch:
+            return self._failed_poll(context, handle.run_id, "ZAP timed out.")
+
         try:
-            payload = self._json(f"/JSON/{run.endpoint}/view/status/", {"scanId": run.scan_id})
-            complete = int(payload["status"]) >= 100
+            payload = self._json(f"/JSON/{endpoint}/view/status/", {"scanId": scan_id})
+            status_val = int(payload.get("status", 0))
+            complete = status_val >= 100
         except (KeyError, TypeError, URLError, ValueError):
             return self._failed_poll(context, handle.run_id, "ZAP status request failed.")
+
         if not complete:
-            return PollResult(handle.run_id, ScanRunStatus.RUNNING)
+            return PollResult(handle.run_id, ScanRunStatus.RUNNING, progress=status_val)
 
         # Scan complete — fetch alerts from ZAP REST daemon and save artifact JSON
         output_path = context.artifact_directory / self.tool_name / f"{handle.run_id}.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            alerts_data = self._json("/JSON/core/view/alerts/", {"baseurl": run.target_url})
+            alerts_data = self._json("/JSON/core/view/alerts/", {"baseurl": target_url})
             if not alerts_data.get("alerts"):
                 alerts_data = self._json("/JSON/core/view/alerts/", {})
             output_path.write_text(json.dumps(alerts_data), encoding="utf-8")
@@ -117,7 +162,7 @@ class ZapAdapter(ToolAdapter):
                 output_path.write_text(json.dumps({"alerts": []}), encoding="utf-8")
 
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.PARSING.value)
-        return PollResult(handle.run_id, ScanRunStatus.PARSING)
+        return PollResult(handle.run_id, ScanRunStatus.PARSING, progress=100)
 
     def parse(self, context: AdapterContext, handle: RunHandle, raw_output: bytes) -> ParseResult:
         evidence = self.persist_raw_artifact(context, handle.run_id, raw_output, ".json")

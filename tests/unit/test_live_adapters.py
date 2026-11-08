@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from urllib.error import URLError
 from datetime import datetime, timedelta, timezone
@@ -303,4 +304,66 @@ def test_nikto_findings_are_enriched_with_cwe_severity_and_cvss(tmp_path: Path):
     assert f_mime.cwe == "CWE-16"
     assert f_mime.severity == "low"
     assert f_mime.cvss == 3.7
+
+
+def test_zap_meta_json_persistence_and_poll_progress(tmp_path: Path):
+    """ZAP start() writes .meta.json, and poll() extracts live progress percentage and recovers without in-memory state."""
+    class Response:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+        def read(self) -> bytes:
+            return self.body
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+
+    def opener(url, timeout):
+        if "version" in url:
+            return Response(b'{"version":"2.17.0"}')
+        if "ascan/action/scan" in url:
+            return Response(b'{"scan":"101"}')
+        if "ascan/view/status" in url:
+            return Response(b'{"status":"55"}')
+        return Response(b'{}')
+
+    repo = Repository(tmp_path / "test.db")
+    scope = register_scope(
+        repo,
+        ScopeRegistration(
+            target="127.0.0.1", allowed_ports="3000", excluded_ports="", excluded_endpoints="",
+            engagement_note="Local lab.", authorized_lab_attested=True,
+            allowed_actions={ActionClass.RECON, ActionClass.ACTIVE_VALIDATION},
+        ),
+    )
+    approval_id = record_approval(
+        repo, scope, target="127.0.0.1", port=3000, scheme="http",
+        action=ActionClass.ACTIVE_VALIDATION, actor="analyst", rationale="Approved.", approved=True,
+    )
+    artifact_dir = tmp_path / "artifacts" / scope.id
+    ctx = AdapterContext(repo, scope, artifact_dir, InMemoryRateLimiter(clock=lambda: 0), approval_id)
+
+    adapter = ZapAdapter(base_url="http://127.0.0.1:8080", opener=opener)
+    validated = adapter.validate(ctx, AdapterRequest(
+        target="127.0.0.1", port=3000, profile="active_scan", scheme="http",
+        action=ActionClass.ACTIVE_VALIDATION, rationale="Active scan.",
+    ))
+    handle = adapter.start(ctx, validated)
+    assert handle.status == ScanRunStatus.RUNNING
+
+    # 1. Verify .meta.json was created on disk
+    meta_file = artifact_dir / "zap" / f"{handle.run_id}.meta.json"
+    assert meta_file.exists()
+    meta_data = json.loads(meta_file.read_text(encoding="utf-8"))
+    assert meta_data["scan_id"] == "101"
+    assert meta_data["endpoint"] == "ascan"
+
+    # 2. Simulate fresh adapter instance (no in-memory _runs)
+    fresh_adapter = ZapAdapter(base_url="http://127.0.0.1:8080", opener=opener)
+    assert handle.run_id not in fresh_adapter._runs
+
+    poll_result = fresh_adapter.poll(ctx, handle)
+    assert poll_result.status == ScanRunStatus.RUNNING
+    assert poll_result.progress == 55
+
 

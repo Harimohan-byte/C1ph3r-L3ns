@@ -114,6 +114,7 @@ class PollResult:
     run_id: str
     status: ScanRunStatus
     reason: str = ""
+    progress: int = 0
 
 
 @dataclass(frozen=True)
