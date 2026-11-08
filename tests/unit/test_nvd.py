@@ -7,17 +7,25 @@ Verifies:
 4. Priority: Findings with Tier 1 native CVE bypass NVD lookup completely.
 5. Successful NVD 2.0 response parsing (CVE, CVSS v3.1 base score, base severity, CWE).
 6. Graceful degradation: timeouts and HTTP errors retain cve=None without raising.
+7. Direct contract tests for fetch_nvd_cve_for_product function.
+8. End-to-end Result Ingestion pipeline integrating Tier 1, Tier 2, and unenriched findings.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 from urllib.error import URLError
 
 import pytest
+
+# Ensure src/ root is present on sys.path for direct test execution
+_src_root = str(Path(__file__).resolve().parents[2] / "src")
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from cipher_lens.adapters.base import AdapterContext, Finding, RunHandle
 from cipher_lens.adapters.nikto import NiktoAdapter
@@ -28,6 +36,7 @@ from cipher_lens.domain.models import ActionClass, ScopeRegistration
 from cipher_lens.persistence.repositories import Repository
 from cipher_lens.services.findings import ingest_and_store_findings
 from cipher_lens.services.nvd import (
+    _NVD_LOOKUP_CACHE,
     clear_nvd_cache,
     enrich_finding_with_nvd,
     fetch_nvd_cve_for_product,
@@ -162,6 +171,44 @@ def test_nmap_extracts_product_and_version(tmp_path: Path):
     assert "Apache httpd 2.4.41" in f.description
 
 
+def test_fetch_nvd_cve_for_product_direct_contract():
+    """fetch_nvd_cve_for_product honors validation guardrails and parses payloads correctly."""
+    # Guardrail 1: Empty product or version
+    assert fetch_nvd_cve_for_product("", "2.4.49", api_key="test-key") is None
+    assert fetch_nvd_cve_for_product("Apache", "  ", api_key="test-key") is None
+
+    # Guardrail 2: Missing or blank api_key
+    assert fetch_nvd_cve_for_product("Apache", "2.4.49", api_key=None) is None
+    assert fetch_nvd_cve_for_product("Apache", "2.4.49", api_key="") is None
+
+    # Direct query with mocked opener
+    nvd_payload = {
+        "vulnerabilities": [
+            {
+                "cve": {
+                    "id": "CVE-2021-41773",
+                    "metrics": {
+                        "cvssMetricV31": [{"cvssData": {"baseScore": 7.5, "baseSeverity": "HIGH"}}]
+                    },
+                    "weaknesses": [{"description": [{"value": "CWE-22"}]}],
+                }
+            }
+        ]
+    }
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(nvd_payload).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+    mock_opener = MagicMock(return_value=mock_resp)
+
+    res = fetch_nvd_cve_for_product("Apache", "2.4.49", api_key="key-abc", opener=mock_opener)
+    assert res is not None
+    assert res["cve"] == "CVE-2021-41773"
+    assert res["cvss"] == 7.5
+    assert res["severity"] == "High"
+    assert res["cwe"] == "CWE-22"
+
+
 def test_nvd_lookup_bypassed_if_finding_has_tier1_cve():
     """A finding with a pre-existing native CVE never triggers an NVD network call."""
     mock_opener = MagicMock()
@@ -275,9 +322,10 @@ def test_successful_nvd_lookup_populates_cve_cvss_and_cwe():
     assert enriched.cwe == "CWE-22"
 
     # Verify HTTP request was structured with apiKey header
-    call_args = mock_opener.call_args
-    req = call_args[0][0]
-    assert req.headers.get("Apikey") == "valid-test-key" or req.headers.get("apikey") == "valid-test-key"
+    mock_opener.assert_called_once()
+    req = mock_opener.call_args[0][0]
+    api_header = req.get_header("Apikey") or req.headers.get("Apikey") or req.headers.get("apikey")
+    assert api_header == "valid-test-key"
     assert "keywordSearch=Apache+2.4.49" in req.full_url
 
 
@@ -354,17 +402,42 @@ def test_result_ingestion_integrates_tier1_and_tier2(tmp_path: Path):
         severity="Info",
     )
 
-    correlated = ingest_and_store_findings(repo, run_id, [f1, f2], api_key="some-key")
+    # Finding 3: Finding with scanner-verified product & version, pre-cached NVD lookup
+    _NVD_LOOKUP_CACHE["apache:2.4.49"] = {
+        "cve": "CVE-2021-41773",
+        "cvss": 7.5,
+        "severity": "High",
+        "cwe": "CWE-22",
+    }
+    f3 = Finding(
+        source_tool="nmap",
+        affected_asset="10.0.0.5:8080",
+        description="Apache HTTP service",
+        product="Apache",
+        version="2.4.49",
+        severity="Info",
+    )
 
-    assert len(correlated) == 2
+    correlated = ingest_and_store_findings(repo, run_id, [f1, f2, f3], api_key="some-key")
+
+    assert len(correlated) == 3
+
+    # Check Tier 1
     cve_finding = next(f for f in correlated if f.cve == "CVE-2020-9999")
     assert cve_finding.cwe == "CWE-79"
     assert cve_finding.severity == Severity.MEDIUM
 
+    # Check Tier 2 enriched via NVD
+    enriched_finding = next(f for f in correlated if f.cve == "CVE-2021-41773")
+    assert enriched_finding.cvss == 7.5
+    assert enriched_finding.severity == Severity.HIGH
+    assert enriched_finding.cwe == "CWE-22"
+
+    # Check Unenriched
     non_cve_finding = next(f for f in correlated if f.cve is None)
     assert non_cve_finding.severity == Severity.INFO
 
     # Audit event verified
     events = [e for e in repo.list_audit_events() if e.event_type == "findings_ingested"]
     assert len(events) == 1
-    assert events[0].detail["correlated_count"] == 2
+    assert events[0].detail["correlated_count"] == 3

@@ -166,8 +166,9 @@ def enrich_finding_with_nvd(
         updates["cve"] = enriched_data["cve"]
     if enriched_data.get("cvss") is not None and finding.cvss is None:
         updates["cvss"] = enriched_data["cvss"]
-    if enriched_data.get("severity") and finding.severity is None:
-        updates["severity"] = enriched_data["severity"]
+    if enriched_data.get("severity"):
+        if finding.severity is None or finding.severity.strip().lower() in {"info", "informational", "none"}:
+            updates["severity"] = enriched_data["severity"]
     if enriched_data.get("cwe") and finding.cwe is None:
         updates["cwe"] = enriched_data["cwe"]
 
