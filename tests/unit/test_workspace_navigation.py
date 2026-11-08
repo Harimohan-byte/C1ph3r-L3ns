@@ -90,3 +90,4 @@ def test_app_pending_workspace_resolution():
 
     assert st.session_state["workspace"] == "Assessment status"
     assert "pending_workspace" not in st.session_state
+

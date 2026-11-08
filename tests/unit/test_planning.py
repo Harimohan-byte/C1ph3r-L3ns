@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -165,9 +166,51 @@ def test_provider_slots_load_from_local_dotenv(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    for name in ("PROVIDER_1_BASE_URL", "PROVIDER_1_API_KEY", "PROVIDER_1_MODEL"):
+    for name in (
+        "PROVIDER_1_BASE_URL",
+        "PROVIDER_1_API_KEY",
+        "PROVIDER_1_MODEL",
+        "PROVIDER_2_BASE_URL",
+        "PROVIDER_2_API_KEY",
+        "PROVIDER_2_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
     slots = provider_slots()
     assert [(slot.label, slot.base_url, slot.model) for slot in slots] == [
         ("provider_1", "https://provider.example/v1", "free-model")
     ]
+
+
+def test_provider_slots_picks_up_live_dotenv_changes_without_polluting_os_environ(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "PROVIDER_1_BASE_URL=https://provider.example/v1\nPROVIDER_1_API_KEY=key-1\nPROVIDER_1_MODEL=model-1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "PROVIDER_1_BASE_URL",
+        "PROVIDER_1_API_KEY",
+        "PROVIDER_1_MODEL",
+        "PROVIDER_2_BASE_URL",
+        "PROVIDER_2_API_KEY",
+        "PROVIDER_2_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    # Initial read
+    assert len(provider_slots()) == 1
+
+    # User modifies .env while app is running to add second provider slot
+    env_file.write_text(
+        "PROVIDER_1_BASE_URL=https://provider.example/v1\nPROVIDER_1_API_KEY=key-1\nPROVIDER_1_MODEL=model-1\n"
+        "PROVIDER_2_BASE_URL=https://provider.example/v2\nPROVIDER_2_API_KEY=key-2\nPROVIDER_2_MODEL=model-2\n",
+        encoding="utf-8",
+    )
+    updated = provider_slots()
+    assert len(updated) == 2
+    assert updated[1].model == "model-2"
+
+    # Confirm config did not leak into os.environ
+    assert "PROVIDER_1_API_KEY" not in os.environ
+    assert "PROVIDER_2_API_KEY" not in os.environ
