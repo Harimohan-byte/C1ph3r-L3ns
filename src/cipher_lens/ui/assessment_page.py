@@ -176,10 +176,19 @@ def _execute_and_collect_scan(
         st.error(f"No adapter registered for tool: {tool_name}")
         return None, None
 
+    action_type = (
+        ActionClass.ACTIVE_VALIDATION
+        if proposal.profile.value == "active_scan"
+        else ActionClass.RECON
+    )
+    scheme = "https" if proposal.port in {443, 8443} else "http"
+
     request = AdapterRequest(
         target=proposal.target,
         port=proposal.port,
         profile=proposal.profile.value,
+        action=action_type,
+        scheme=scheme,
         rationale=proposal.rationale,
         anticipated_next_steps=[
             {"tool": step.tool.value, "profile": step.profile.value, "rationale": step.rationale}
@@ -423,12 +432,20 @@ def render(repository: Repository) -> None:
                 print(f"\n[CIPHER LENS UI] >>> 'Execute Proposed Scan' clicked by user.", flush=True)
                 print(f"[CIPHER LENS UI] Tool: {outcome.proposal.tool.value} | Profile: {outcome.proposal.profile.value} | Target: {outcome.proposal.target}", flush=True)
                 artifact_dir = data_directory() / "artifacts" / selected.id
+                # Check for an active approved authorization for this target/port/action
+                matched_approval_id = None
+                approved_records = repository.list_approvals(selected.id, status="approved")
+                for app in approved_records:
+                    if app.target == outcome.proposal.target and (app.port is None or app.port == outcome.proposal.port):
+                        matched_approval_id = app.id
+                        break
+
                 adapter_context = AdapterContext(
                     repository=repository,
                     scope=selected,
                     artifact_directory=artifact_dir,
                     rate_limiter=_session_rate_limiter(),
-                    approval_id=None,
+                    approval_id=matched_approval_id,
                 )
                 run_id, msg = _execute_and_collect_scan(
                     repository, selected, outcome.proposal, adapter_context
