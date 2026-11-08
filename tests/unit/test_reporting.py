@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+# Ensure src/ root is present on sys.path for IDE language servers and direct execution
+_src_root = str(Path(__file__).resolve().parents[2] / "src")
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from cipher_lens.domain.findings import FindingProvenance, NormalizedFinding, Severity, ValidationStatus
 from cipher_lens.domain.models import ActionClass, ScopeRegistration
@@ -423,7 +428,7 @@ def test_pdf_report_numbered_canvas_cover_and_appendix(test_repo: Repository, po
     orig_draw_footer = NumberedCanvas._draw_page_footer
 
     def tracked_footer(self, total_pages: int):
-        footer_calls.append({"page": self._pageNumber, "total": total_pages})
+        footer_calls.append({"page": self.getPageNumber(), "total": total_pages})
         return orig_draw_footer(self, total_pages)
 
     with patch.object(NumberedCanvas, "_draw_page_footer", tracked_footer):
@@ -438,8 +443,4 @@ def test_pdf_report_numbered_canvas_cover_and_appendix(test_repo: Repository, po
     assert total_pages >= 2
     # Check page numbers
     assert [call["page"] for call in footer_calls] == list(range(1, total_pages + 1))
-
-
-
-
 

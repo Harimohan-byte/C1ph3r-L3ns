@@ -77,7 +77,7 @@ class NumberedCanvas(canvas.Canvas):
         self.drawString(LOGO_X_PT, 25.0, "CONFIDENTIAL · AUTHORIZED ASSESSMENT DISTRIBUTION ONLY")
 
         # Right side: Page X of Y
-        page_str = f"Page {self._pageNumber} of {total_pages}"
+        page_str = f"Page {self.getPageNumber()} of {total_pages}"
         self.drawRightString(RUNNING_TEXT_X_PT, 25.0, page_str)
 
         # Subtle footer divider rule
@@ -88,13 +88,13 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
-def _draw_first_page(canvas: Any, doc: SimpleDocTemplate) -> None:
+def _draw_first_page(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> None:
     """Canvas callback to decorate the first page header with the top-left Cipher-Lens logo."""
-    canvas.saveState()
+    page_canvas.saveState()
     logo_path = _resolve_logo_path()
     if logo_path is not None:
         try:
-            canvas.drawImage(
+            page_canvas.drawImage(
                 str(logo_path),
                 LOGO_X_PT,
                 LOGO_Y_PT,
@@ -107,16 +107,16 @@ def _draw_first_page(canvas: Any, doc: SimpleDocTemplate) -> None:
             logger.warning("Failed to render Cipher-Lens logo on first page: %s", exc)
     else:
         logger.warning("Cipher-Lens logo asset not found; omitting header logo.")
-    canvas.restoreState()
+    page_canvas.restoreState()
 
 
-def _draw_later_pages(canvas: Any, doc: SimpleDocTemplate) -> None:
+def _draw_later_pages(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> None:
     """Canvas callback to decorate interior page headers with logo, running title, and divider rule."""
-    canvas.saveState()
+    page_canvas.saveState()
     logo_path = _resolve_logo_path()
     if logo_path is not None:
         try:
-            canvas.drawImage(
+            page_canvas.drawImage(
                 str(logo_path),
                 LOGO_X_PT,
                 LOGO_Y_PT,
@@ -131,16 +131,16 @@ def _draw_later_pages(canvas: Any, doc: SimpleDocTemplate) -> None:
         logger.warning("Cipher-Lens logo asset not found; omitting interior header logo.")
 
     # Running header text
-    canvas.setFont("Helvetica-Bold", 8)
-    canvas.setFillColor(colors.HexColor("#516D18"))
-    canvas.drawRightString(RUNNING_TEXT_X_PT, RUNNING_TEXT_Y_PT, "CIPHER LENS · SECURITY ASSESSMENT REPORT")
+    page_canvas.setFont("Helvetica-Bold", 8)
+    page_canvas.setFillColor(colors.HexColor("#516D18"))
+    page_canvas.drawRightString(RUNNING_TEXT_X_PT, RUNNING_TEXT_Y_PT, "CIPHER LENS · SECURITY ASSESSMENT REPORT")
 
     # Dividing rule separating header from content
-    canvas.setStrokeColor(colors.HexColor("#E5D7C0"))
-    canvas.setLineWidth(0.5)
-    canvas.line(LOGO_X_PT, RUNNING_RULE_Y_PT, RUNNING_TEXT_X_PT, RUNNING_RULE_Y_PT)
+    page_canvas.setStrokeColor(colors.HexColor("#E5D7C0"))
+    page_canvas.setLineWidth(0.5)
+    page_canvas.line(LOGO_X_PT, RUNNING_RULE_Y_PT, RUNNING_TEXT_X_PT, RUNNING_RULE_Y_PT)
 
-    canvas.restoreState()
+    page_canvas.restoreState()
 
 
 # --- CWE Name and OWASP Top 10 Lookup Mapping ---
@@ -254,7 +254,6 @@ def _group_findings_for_report(findings: list[NormalizedFinding]) -> list[Groupe
     return grouped_list
 
 
-
 def build_report_context(repository: Repository, scope_id: str) -> dict[str, Any]:
     """Compile persisted scope, run, finding, and approval records for the assessment."""
     scopes = repository.list_scopes()
@@ -265,7 +264,7 @@ def build_report_context(repository: Repository, scope_id: str) -> dict[str, Any
     runs = repository.list_scan_runs(scope_id)
     findings = repository.list_findings(scope_id=scope_id)
     approvals = repository.list_approvals(scope_id=scope_id)
-    audit_events = [e for e in repository.list_audit_events() if e.detail.get("scope_id") == scope_id or e.entity_id == scope_id]
+    audit_events = [e for e in repository.list_audit_events() if (e.detail or {}).get("scope_id") == scope_id or e.entity_id == scope_id]
 
     # Calculate severity distribution
     distribution = {
@@ -289,17 +288,23 @@ def build_report_context(repository: Repository, scope_id: str) -> dict[str, Any
     }
 
 
-def _severity_color(severity: str) -> colors.Color:
+def _severity_hex(severity: str) -> str:
+    """Return standard hex color string for finding severity levels."""
     sev = severity.lower()
     if sev == "critical":
-        return colors.HexColor("#B42318")
+        return "#B42318"
     if sev == "high":
-        return colors.HexColor("#D9381E")
+        return "#D9381E"
     if sev == "medium":
-        return colors.HexColor("#D97706")
+        return "#D97706"
     if sev == "low":
-        return colors.HexColor("#155EEF")
-    return colors.HexColor("#4B5563")
+        return "#155EEF"
+    return "#4B5563"
+
+
+def _severity_color(severity: str) -> colors.Color:
+    """Return ReportLab Color object matching the brand severity palette."""
+    return colors.HexColor(_severity_hex(severity))
 
 
 def generate_vapt_pdf(
@@ -512,7 +517,7 @@ def generate_vapt_pdf(
             ]
         ]
         for i, tf in enumerate(top_findings, 1):
-            sev_color = _severity_color(tf.severity.value).hexval()
+            sev_color = _severity_hex(tf.severity.value)
             top_rows.append([
                 Paragraph(str(i), body_style),
                 Paragraph(html.escape(tf.canonical_title), body_bold),
@@ -583,8 +588,11 @@ def generate_vapt_pdf(
                 timing_text = f"<br/><font color='#423E32' size='7'>{html.escape(start_clean)}"
                 if r.completed_at:
                     try:
-                        t0 = datetime.fromisoformat(r.started_at)
-                        t1 = datetime.fromisoformat(r.completed_at)
+                        t0 = datetime.fromisoformat(r.started_at.replace("Z", "+00:00"))
+                        t1 = datetime.fromisoformat(r.completed_at.replace("Z", "+00:00"))
+                        if (t0.tzinfo is None) != (t1.tzinfo is None):
+                            t0 = t0.replace(tzinfo=None)
+                            t1 = t1.replace(tzinfo=None)
                         dur = max(0, int((t1 - t0).total_seconds()))
                         timing_text += f" ({dur}s)"
                     except Exception:
@@ -711,7 +719,7 @@ def generate_vapt_pdf(
         )
     else:
         for idx, gf in enumerate(grouped_findings, start=1):
-            sev_badge = f"<font color='{_severity_color(gf.severity.value).hexval()}'><b>[{gf.severity.value.upper()}]</b></font>"
+            sev_badge = f"<font color='{_severity_hex(gf.severity.value)}'><b>[{gf.severity.value.upper()}]</b></font>"
             score_badge = f"<b>Priority: {gf.priority_score:.1f}/10.0</b>"
 
             meta_tokens = []
@@ -939,7 +947,7 @@ def generate_vapt_pdf(
                 Paragraph("<b>Cryptographic SHA-256 Digest</b>", body_bold),
             ]
         ]
-        for key, (ref_id, tool_name, sha, filename) in evidence_registry.items():
+        for ref_id, tool_name, sha, filename in evidence_registry.values():
             reg_rows.append([
                 Paragraph(f"<b>{ref_id}</b>", body_bold),
                 Paragraph(html.escape(tool_name), code_style),

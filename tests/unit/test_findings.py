@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError as PydanticValidationError
+
+# Ensure src/ root is present on sys.path for IDE language servers and direct execution
+_src_root = str(Path(__file__).resolve().parents[2] / "src")
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from cipher_lens.adapters.base import EvidenceArtifact, Finding
 from cipher_lens.domain.findings import (
@@ -16,6 +22,7 @@ from cipher_lens.domain.findings import (
     Severity,
     ValidationStatus,
 )
+from cipher_lens.domain.models import ActionClass, ScopeRegistration
 from cipher_lens.persistence.repositories import Repository
 from cipher_lens.services.findings import (
     calculate_priority_score,
@@ -27,6 +34,7 @@ from cipher_lens.services.findings import (
     normalize_severity,
     sort_findings,
 )
+from cipher_lens.services.scope_registration import register_scope
 
 
 def test_normalize_severity_maps_tool_formats_safely():
@@ -199,6 +207,8 @@ def test_consolidation_merges_provenance_and_highest_metrics():
     # Ingest from both tools
     nikto_norm = normalize_and_correlate([finding_nikto], evidence_nikto, "run-1")
     zap_norm = normalize_and_correlate([finding_zap], evidence_zap, "run-2")
+    assert len(nikto_norm) == 1
+    assert len(zap_norm) == 1
 
     # Ingest combined
     combined = normalize_and_correlate(
@@ -324,9 +334,6 @@ def test_ingest_and_store_findings_persists_to_repository_and_audits(tmp_path: P
     repository = Repository(db_file)
 
     # Setup parent scope and scan_run
-    from cipher_lens.domain.models import ActionClass, ScopeRegistration
-    from cipher_lens.services.scope_registration import register_scope
-
     scope = register_scope(
         repository,
         ScopeRegistration(

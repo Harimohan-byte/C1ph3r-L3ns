@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import html
-import json
-from datetime import datetime, timezone
 
 import streamlit as st
 
 from cipher_lens.config import zap_base_url
-from cipher_lens.domain.models import ActionClass, ScopeRecord
+from cipher_lens.domain.models import ActionClass
 from cipher_lens.persistence.repositories import ApprovalSummary, Repository
 from cipher_lens.services.approvals import (
     ApprovalStatus,

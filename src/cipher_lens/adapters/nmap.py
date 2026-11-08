@@ -16,7 +16,7 @@ try:
 except ImportError:
     windll = None  # Non-Windows systems
 
-from cipher_lens.adapters.base import AdapterContext, AdapterRequest, Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ToolAdapter, ValidationResult
+from cipher_lens.adapters.base import AdapterContext, Finding, ParseResult, PollResult, RunHandle, ScanRunStatus, ToolAdapter, ValidationResult
 from cipher_lens.services.audit import record
 
 
