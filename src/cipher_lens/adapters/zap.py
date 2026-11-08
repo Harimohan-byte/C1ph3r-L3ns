@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -85,10 +86,40 @@ class ZapAdapter(ToolAdapter):
             payload = json.loads(raw_output.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self.parse_failure(context, handle, evidence, "ZAP returned malformed JSON output.")
-        findings = [Finding(source_tool=self.tool_name, affected_asset=alert.get("url", "unknown"),
-                    description=alert.get("description", "ZAP alert observed."), severity=alert.get("risk"),
-                    confidence=alert.get("confidence", "observed"), validation_status="not_validated")
-                    for alert in payload.get("alerts", [])]
+
+        findings: list[Finding] = []
+        for alert in payload.get("alerts", []):
+            url = alert.get("url", "unknown")
+            desc = alert.get("description", "ZAP alert observed.")
+            ref = str(alert.get("reference", ""))
+            other = str(alert.get("otherinfo", ""))
+            combined_ref = f"{desc} {ref} {other}"
+
+            # Extract CWE: ZAP JSON alerts usually have "cweid" (numeric)
+            cwe = None
+            raw_cweid = str(alert.get("cweid", "")).strip()
+            if raw_cweid and raw_cweid not in {"0", "-1"}:
+                cwe = f"CWE-{raw_cweid}"
+            else:
+                cwe_match = re.search(r"\bCWE-\d+\b", combined_ref, re.IGNORECASE)
+                if cwe_match:
+                    cwe = cwe_match.group(0).upper()
+
+            # Extract CVE: from reference, description, etc.
+            cve_match = re.search(r"\bCVE-\d{4}-\d{4,7}\b", combined_ref, re.IGNORECASE)
+            cve = cve_match.group(0).upper() if cve_match else None
+
+            findings.append(Finding(
+                source_tool=self.tool_name,
+                affected_asset=url,
+                description=desc,
+                severity=alert.get("risk"),
+                cve=cve,
+                cwe=cwe,
+                confidence=alert.get("confidence", "observed"),
+                validation_status="not_validated",
+            ))
+
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.DONE.value)
         return ParseResult(evidence=evidence, findings=findings)
 

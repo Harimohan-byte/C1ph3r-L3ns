@@ -1,6 +1,7 @@
 """Scoped Nikto XML adapter with one fixed, auditable command bundle."""
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import time
@@ -64,9 +65,42 @@ class NiktoAdapter(ToolAdapter):
             root = ET.fromstring(raw_output)
         except ET.ParseError:
             return self.parse_failure(context, handle, evidence, "Nikto returned malformed XML output.")
-        findings = [Finding(source_tool=self.tool_name, affected_asset=item.get("targetip", "unknown"),
-                    description=(item.findtext("description") or "Nikto finding observed."), confidence="observed", validation_status="not_validated")
-                    for item in root.findall(".//item")]
+
+        findings: list[Finding] = []
+        scandetails = root.find(".//scandetails")
+        site_ip = (scandetails.get("targetip") or scandetails.get("siteip") or "unknown") if scandetails is not None else "unknown"
+        target_banner = scandetails.get("targetbanner") if scandetails is not None else None
+
+        product = None
+        version = None
+        if target_banner and "/" in target_banner:
+            banner_parts = target_banner.split(" ")[0].split("/", 1)
+            product = banner_parts[0].strip()
+            version = banner_parts[1].strip() if len(banner_parts) > 1 else None
+
+        for item in root.findall(".//item"):
+            desc = item.findtext("description") or "Nikto finding observed."
+            refs = item.findtext("references") or ""
+            target_ip = item.get("targetip") or site_ip
+
+            combined = f"{desc} {refs}"
+            cve_match = re.search(r"\bCVE-\d{4}-\d{4,7}\b", combined, re.IGNORECASE)
+            cve = cve_match.group(0).upper() if cve_match else None
+
+            cwe_match = re.search(r"\bCWE-\d+\b", combined, re.IGNORECASE)
+            cwe = cwe_match.group(0).upper() if cwe_match else None
+
+            findings.append(Finding(
+                source_tool=self.tool_name,
+                affected_asset=target_ip,
+                description=desc,
+                cve=cve,
+                cwe=cwe,
+                product=product,
+                version=version,
+                confidence="observed",
+                validation_status="not_validated",
+            ))
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.DONE.value)
         return ParseResult(evidence=evidence, findings=findings)
 

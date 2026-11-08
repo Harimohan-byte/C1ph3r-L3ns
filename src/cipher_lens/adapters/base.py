@@ -54,6 +54,8 @@ class Finding(BaseModel):
     cwe: str | None = None
     confidence: str | None = None
     validation_status: str = "suspected"
+    product: str | None = None
+    version: str | None = None
 
 
 class AdapterRequest(BaseModel):

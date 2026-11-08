@@ -86,8 +86,22 @@ class NmapAdapter(ToolAdapter):
                 reason = state.get("reason", "unspecified")
                 service = port.find("service")
                 service_name = service.get("name", "unknown") if service is not None else "unknown"
-                findings.append(Finding(source_tool=self.tool_name, affected_asset=f"{address}:{port.get('portid')}",
-                    description=f"Open {service_name} port observed; Nmap reason: {reason}.", confidence="observed", validation_status="not_validated"))
+                product = service.get("product") if service is not None else None
+                version = service.get("version") if service is not None else None
+                desc_extra = ""
+                if product:
+                    desc_extra = f"; Product: {product}"
+                    if version:
+                        desc_extra += f" {version}"
+                findings.append(Finding(
+                    source_tool=self.tool_name,
+                    affected_asset=f"{address}:{port.get('portid')}",
+                    description=f"Open {service_name} port observed; Nmap reason: {reason}{desc_extra}.",
+                    product=product,
+                    version=version,
+                    confidence="observed",
+                    validation_status="not_validated",
+                ))
         context.repository.update_scan_run(handle.run_id, ScanRunStatus.DONE.value)
         record(context.repository, event_type="adapter_parse", outcome="done", entity_type="scan_run", entity_id=handle.run_id,
                detail={"tool": self.tool_name, "finding_count": len(findings)})

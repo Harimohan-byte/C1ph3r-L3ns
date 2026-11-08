@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from cipher_lens.adapters.base import EvidenceArtifact, Finding
+from cipher_lens.config import nvd_api_key
 from cipher_lens.domain.findings import (
     FindingProvenance,
     NormalizedFinding,
@@ -23,6 +24,7 @@ from cipher_lens.domain.findings import (
 )
 from cipher_lens.persistence.repositories import Repository
 from cipher_lens.services.audit import record
+from cipher_lens.services.nvd import enrich_finding_with_nvd
 
 
 def normalize_severity(raw_severity: str | None) -> Severity:
@@ -266,9 +268,19 @@ def ingest_and_store_findings(
     scan_run_id: str,
     findings: Sequence[Finding],
     evidence: EvidenceArtifact | None = None,
+    api_key: str | None = None,
 ) -> list[NormalizedFinding]:
-    """Correlate parsed scanner findings, persist to SQLite, and write an audit event."""
-    correlated = normalize_and_correlate(findings, evidence, scan_run_id)
+    """Correlate parsed scanner findings, persist to SQLite, and write an audit event.
+
+    Enriches findings with CVE/CVSS at Result Ingestion time:
+    - Tier 1: Scanners (Nikto, ZAP) natively populate CVE/CWE tokens.
+    - Tier 2: If finding carries a scanner-captured product & version and lacks CVE,
+      enrich via NIST NVD API 2.0 (if configured).
+    """
+    effective_api_key = api_key if api_key is not None else nvd_api_key()
+    enriched = [enrich_finding_with_nvd(f, api_key=effective_api_key) for f in findings]
+
+    correlated = normalize_and_correlate(enriched, evidence, scan_run_id)
     repository.save_findings(correlated)
 
     record(

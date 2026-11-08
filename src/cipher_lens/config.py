@@ -50,3 +50,10 @@ def zap_base_url() -> str:
     """Return the checked local ZAP default when no daemon URL is configured."""
     load_local_environment()
     return os.getenv("ZAP_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+
+
+def nvd_api_key() -> str | None:
+    """Return the configured NIST NVD API key, or None if unconfigured."""
+    load_local_environment()
+    key = os.getenv("NVD_API_KEY", "").strip()
+    return key if key else None
