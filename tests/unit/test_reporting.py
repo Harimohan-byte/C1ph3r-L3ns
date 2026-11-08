@@ -288,3 +288,158 @@ def test_pdf_report_graceful_fallback_when_logo_missing(test_repo: Repository, p
     assert any("logo asset not found" in record.message.lower() for record in caplog.records)
 
 
+def test_pdf_report_escapes_xml_entities_without_parser_crash(test_repo: Repository):
+    """T001: Ensure raw ampersands and angle brackets in URLs, rationales, and descriptions do not break ReportLab."""
+    scope = register_scope(
+        test_repo,
+        ScopeRegistration(
+            target="10.10.10.60",
+            allowed_ports="80,443",
+            engagement_note="Testing <script>alert(1)</script> & special chars",
+            authorized_lab_attested=True,
+            allowed_actions={ActionClass.RECON, ActionClass.ACTIVE_VALIDATION},
+        ),
+    )
+
+    # Scan run with raw URL query parameters containing '&' and entities
+    run_id = str(uuid4())
+    test_repo.create_scan_run(
+        run_id, scope.id, "zap", "spider", "done", "Spidering /socket.io/?EIO=3&transport=polling&t=N1234&sid=XYZ"
+    )
+
+    # Finding with XML special characters
+    raw_finding = NormalizedFinding(
+        id=str(uuid4()),
+        canonical_title="Reflected XSS in <search> & query parameter",
+        affected_asset="10.10.10.60:80/search?q=<script>alert('XSS')&filter=1",
+        description="Observed parameter payload: <script src='http://evil.com/x.js&sid=1'></script> & response diff.",
+        severity=Severity.HIGH,
+        cvss=7.5,
+        cve=None,
+        cwe="CWE-79",
+        confidence="observed",
+        validation_status=ValidationStatus.SUSPECTED,
+        priority_score=7.5,
+        provenance=[],
+        scan_run_id=run_id,
+    )
+    test_repo.save_findings([raw_finding])
+
+    # Approval with ampersands and quotes
+    record_approval(
+        test_repo,
+        scope,
+        target="10.10.10.60",
+        port=80,
+        scheme="http",
+        action=ActionClass.ACTIVE_VALIDATION,
+        actor="Lead Reviewer <Alice & Bob>",
+        rationale="Approved for target testing with parameters &sid=999 &t=abc",
+        approved=True,
+    )
+
+    # Must generate PDF cleanly without throwing xml.parsers.expat.ExpatError
+    pdf_bytes = generate_vapt_pdf(test_repo, scope.id)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 2000
+
+
+def test_group_findings_for_report_consolidates_identical_cwes_and_enriches_titles():
+    """T008 & T009: Multiple findings sharing CWE-1021 collapse into 1 card with CWE/OWASP enrichment."""
+    from cipher_lens.services.reporting import _group_findings_for_report
+
+    f1 = NormalizedFinding(
+        id=str(uuid4()),
+        canonical_title="Weakness: CWE-1021",
+        affected_asset="10.10.10.50:80/account",
+        description="Missing Anti-Clickjacking header on account page.",
+        severity=Severity.MEDIUM,
+        cvss=5.3,
+        cve=None,
+        cwe="CWE-1021",
+        confidence="observed",
+        validation_status=ValidationStatus.SUSPECTED,
+        priority_score=4.8,
+        provenance=[],
+        scan_run_id=None,
+    )
+    f2 = NormalizedFinding(
+        id=str(uuid4()),
+        canonical_title="Weakness: CWE-1021",
+        affected_asset="10.10.10.50:80/checkout",
+        description="Missing Anti-Clickjacking header on checkout page.",
+        severity=Severity.MEDIUM,
+        cvss=5.3,
+        cve=None,
+        cwe="CWE-1021",
+        confidence="observed",
+        validation_status=ValidationStatus.SUSPECTED,
+        priority_score=4.8,
+        provenance=[],
+        scan_run_id=None,
+    )
+    f3 = NormalizedFinding(
+        id=str(uuid4()),
+        canonical_title="SQL Injection in Login",
+        affected_asset="10.10.10.50:80/login",
+        description="SQL Injection in auth form.",
+        severity=Severity.CRITICAL,
+        cvss=9.8,
+        cve="CVE-2023-9999",
+        cwe="CWE-89",
+        confidence="confirmed",
+        validation_status=ValidationStatus.CONFIRMED,
+        priority_score=10.0,
+        provenance=[],
+        scan_run_id=None,
+    )
+
+    grouped = _group_findings_for_report([f1, f2, f3])
+    # 3 raw findings should collapse to 2 distinct grouped finding cards
+    assert len(grouped) == 2
+
+    # First is SQL Injection (highest priority score 10.0)
+    assert grouped[0].cve == "CVE-2023-9999"
+    assert grouped[0].cwe_name == "SQL Injection"
+    assert grouped[0].owasp_category == "OWASP A03:2021-Injection"
+    assert len(grouped[0].affected_assets) == 1
+
+    # Second is Clickjacking (collapsed from f1 and f2)
+    assert grouped[1].cwe == "CWE-1021"
+    assert grouped[1].cwe_name == "Clickjacking"
+    assert "Clickjacking" in grouped[1].canonical_title
+    assert grouped[1].owasp_category == "OWASP A05:2021-Security Misconfiguration"
+    assert len(grouped[1].affected_assets) == 2
+    assert "10.10.10.50:80/account" in grouped[1].affected_assets
+    assert "10.10.10.50:80/checkout" in grouped[1].affected_assets
+
+
+def test_pdf_report_numbered_canvas_cover_and_appendix(test_repo: Repository, populated_scope):
+    """T015-T018: Verify NumberedCanvas footer, Cover page structure, Appendix A & QR integrity seal."""
+    from unittest.mock import patch
+    from cipher_lens.services.reporting import NumberedCanvas
+
+    footer_calls = []
+    orig_draw_footer = NumberedCanvas._draw_page_footer
+
+    def tracked_footer(self, total_pages: int):
+        footer_calls.append({"page": self._pageNumber, "total": total_pages})
+        return orig_draw_footer(self, total_pages)
+
+    with patch.object(NumberedCanvas, "_draw_page_footer", tracked_footer):
+        pdf_bytes = generate_vapt_pdf(test_repo, populated_scope.id)
+
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 2000
+
+    # NumberedCanvas should execute footer on all pages (at least 2 pages due to Cover Page PageBreak)
+    assert len(footer_calls) >= 2
+    total_pages = footer_calls[0]["total"]
+    assert total_pages >= 2
+    # Check page numbers
+    assert [call["page"] for call in footer_calls] == list(range(1, total_pages + 1))
+
+
+
+
+

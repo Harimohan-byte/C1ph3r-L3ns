@@ -90,6 +90,36 @@ def test_derive_canonical_title_prefers_cve_and_cwe():
     assert derive_canonical_title(finding_desc) == "Open http port observed"
 
 
+def test_derive_canonical_title_preserves_filenames_versions_and_balances_parentheses():
+    """T002: Ensure file extensions (.txt), versions (2.4.41), and parens are handled cleanly."""
+    # File extension in description should not be split at .txt
+    finding_robots = Finding(
+        source_tool="nikto",
+        affected_asset="10.0.0.1:80",
+        description="/robots.txt: contains 2 entries which should be manually inspected.",
+    )
+    assert derive_canonical_title(finding_robots) == "/robots.txt: contains 2 entries which should be manually inspected"
+
+    # Version number should not be split at 2.4
+    finding_ver = Finding(
+        source_tool="nmap",
+        affected_asset="10.0.0.1:80",
+        description="Apache 2.4.41 outdated version observed; upgrade recommended.",
+    )
+    assert derive_canonical_title(finding_ver) == "Apache 2.4.41 outdated version observed"
+
+    # Long description with parenthesis should truncate at word boundary and balance parens
+    finding_paren = Finding(
+        source_tool="nikto",
+        affected_asset="10.0.0.1:80",
+        description="The anti-clickjacking X-Frame-Options header is not present (see CWE-1021 for additional mitigation details and browser guidelines).",
+    )
+    title = derive_canonical_title(finding_paren)
+    assert title.endswith(")...")
+    assert not title.endswith(" (see...")
+    assert "(" in title and ")" in title
+
+
 def test_deduplication_matching_cve_and_signature():
     # Same asset, same CVE -> duplicate
     key1 = deduplication_key("http://127.0.0.1:8080", "2023-9999", None, "SQL Injection")

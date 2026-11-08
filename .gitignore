@@ -21,6 +21,9 @@ graphify-out/
 data/
 reports/
 *.log
+*.nessus
+*_openvas.xml
+metasploitable2*
 
 # Internal development, task tracking, and agent artifacts (non-client)
 Project-Context.md

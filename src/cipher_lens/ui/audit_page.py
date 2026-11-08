@@ -78,34 +78,48 @@ def _render_approval_card(approval: ApprovalSummary, repository: Repository) -> 
                     reject_btn = st.form_submit_button("Reject validation")
 
             if approve_btn:
-                try:
-                    transition_approval(
-                        repository,
-                        approval.id,
-                        ApprovalStatus.APPROVED,
-                        actor=actor,
-                        rationale=rationale,
-                    )
-                except ValueError as error:
-                    inline_error(friendly_validation_message(error))
+                actor_clean = (actor or "").strip()
+                rationale_clean = (rationale or "").strip()
+                if len(actor_clean) < 2:
+                    inline_error("Reviewer name or identifier is required (minimum 2 characters).")
+                elif len(rationale_clean) < 5:
+                    inline_error("Decision rationale must provide evidence-linked justification (minimum 5 characters).")
                 else:
-                    st.success("Approval granted. Active validation may now be executed within 15 minutes.")
-                    st.rerun()
+                    try:
+                        transition_approval(
+                            repository,
+                            approval.id,
+                            ApprovalStatus.APPROVED,
+                            actor=actor_clean,
+                            rationale=rationale_clean,
+                        )
+                    except ValueError as error:
+                        inline_error(friendly_validation_message(error))
+                    else:
+                        st.success("Approval granted. Active validation may now be executed within 15 minutes.")
+                        st.rerun()
 
             elif reject_btn:
-                try:
-                    transition_approval(
-                        repository,
-                        approval.id,
-                        ApprovalStatus.REJECTED,
-                        actor=actor,
-                        rationale=rationale,
-                    )
-                except ValueError as error:
-                    inline_error(friendly_validation_message(error))
+                actor_clean = (actor or "").strip()
+                rationale_clean = (rationale or "").strip()
+                if len(actor_clean) < 2:
+                    inline_error("Reviewer name or identifier is required (minimum 2 characters).")
+                elif len(rationale_clean) < 5:
+                    inline_error("Decision rationale must provide justification (minimum 5 characters).")
                 else:
-                    st.info("Validation request rejected.")
-                    st.rerun()
+                    try:
+                        transition_approval(
+                            repository,
+                            approval.id,
+                            ApprovalStatus.REJECTED,
+                            actor=actor_clean,
+                            rationale=rationale_clean,
+                        )
+                    except ValueError as error:
+                        inline_error(friendly_validation_message(error))
+                    else:
+                        st.info("Validation request rejected.")
+                        st.rerun()
 
 
 def render(repository: Repository) -> None:

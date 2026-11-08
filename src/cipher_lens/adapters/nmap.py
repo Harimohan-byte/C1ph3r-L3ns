@@ -174,6 +174,14 @@ class NmapAdapter(ToolAdapter):
                 service_name = service.get("name", "unknown") if service is not None else "unknown"
                 product = service.get("product") if service is not None else None
                 version = service.get("version") if service is not None else None
+
+                service_display = service_name
+                if service_name.lower() in {"ppp", "unknown"} and product:
+                    is_web = any(k in product.lower() for k in ("http", "express", "node", "web", "apache", "nginx"))
+                    service_display = f"http, {product}" if is_web else product
+                elif product and service_name != "unknown":
+                    service_display = f"{service_name}, {product}"
+
                 desc_extra = ""
                 if product:
                     desc_extra = f"; Product: {product}"
@@ -182,7 +190,7 @@ class NmapAdapter(ToolAdapter):
                 findings.append(Finding(
                     source_tool=self.tool_name,
                     affected_asset=f"{address}:{port.get('portid')}",
-                    description=f"Open {service_name} port observed; Nmap reason: {reason}{desc_extra}.",
+                    description=f"Open {service_display} port observed; Nmap reason: {reason}{desc_extra}.",
                     product=product,
                     version=version,
                     confidence="observed",

@@ -81,10 +81,22 @@ def derive_canonical_title(finding: Finding) -> str:
         return f"Weakness: {cwe_clean}"
 
     desc = finding.description.strip()
-    first_clause = re.split(r"[.;\n]", desc)[0].strip()
+    # Split on sentence ending (period followed by whitespace or end), newlines, or semicolons
+    # Avoid splitting on internal periods in filenames (.txt, .php), version strings (2.4.41), or IPs
+    clauses = re.split(r"(?:\.(?:\s+|$)|[\r\n]+|;\s*)", desc)
+    first_clause = clauses[0].strip() if clauses else ""
     if first_clause:
         if len(first_clause) > 80:
-            first_clause = first_clause[:77] + "..."
+            truncated = first_clause[:77]
+            last_space = truncated.rfind(" ")
+            if last_space > 40:
+                truncated = truncated[:last_space]
+            truncated = truncated.rstrip(",;- ")
+            open_parens = truncated.count("(")
+            close_parens = truncated.count(")")
+            if open_parens > close_parens:
+                truncated += ")" * (open_parens - close_parens)
+            first_clause = f"{truncated}..."
         return first_clause
 
     return f"Security observation from {finding.source_tool}"
