@@ -27,7 +27,7 @@ _src_root = str(Path(__file__).resolve().parents[2] / "src")
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
 
-from cipher_lens.adapters.base import AdapterContext, Finding, RunHandle
+from cipher_lens.adapters.base import AdapterContext, Finding, RunHandle, ScanRunStatus
 from cipher_lens.adapters.nikto import NiktoAdapter
 from cipher_lens.adapters.nmap import NmapAdapter
 from cipher_lens.adapters.zap import ZapAdapter
@@ -66,7 +66,7 @@ def _make_context(tmp_path: Path, run_id: str, tool: str) -> tuple[AdapterContex
             allowed_actions={ActionClass.RECON},
         ),
     )
-    repo.create_scan_run(run_id, scope.id, tool, "quick_recon", "parsing")
+    repo.create_scan_run(run_id, scope.id, tool, "quick_recon", ScanRunStatus.PARSING.value)
     context = AdapterContext(
         repository=repo,
         scope=scope,
@@ -80,7 +80,7 @@ def test_tier1_nikto_extracts_native_cve_and_cwe_without_network(tmp_path: Path)
     """Nikto XML parser extracts native CVE and CWE tokens from <references> and <description>."""
     run_id = "run-nikto-1"
     context, repo = _make_context(tmp_path, run_id, "nikto")
-    handle = RunHandle(run_id, "parsing")
+    handle = RunHandle(run_id, ScanRunStatus.PARSING)
 
     xml_content = b"""<?xml version="1.0" ?>
     <niktoscans>
@@ -114,7 +114,7 @@ def test_tier1_zap_extracts_native_cweid_and_cve_without_network(tmp_path: Path)
     """ZAP JSON parser extracts native cweid and CVE references without network access."""
     run_id = "run-zap-1"
     context, repo = _make_context(tmp_path, run_id, "zap")
-    handle = RunHandle(run_id, "parsing")
+    handle = RunHandle(run_id, ScanRunStatus.PARSING)
 
     zap_json = json.dumps({
         "alerts": [
@@ -144,7 +144,7 @@ def test_nmap_extracts_product_and_version(tmp_path: Path):
     """Nmap XML parser extracts verified product and version from <service> element."""
     run_id = "run-nmap-1"
     context, repo = _make_context(tmp_path, run_id, "nmap")
-    handle = RunHandle(run_id, "parsing")
+    handle = RunHandle(run_id, ScanRunStatus.PARSING)
 
     nmap_xml = b"""<?xml version="1.0" ?>
     <nmaprun>
