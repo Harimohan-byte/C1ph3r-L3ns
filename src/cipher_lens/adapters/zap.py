@@ -68,6 +68,12 @@ class ZapAdapter(ToolAdapter):
                     alias_url = f"{request.scheme}://{alias_host}:{request.port}"
                     if alias_url in sites:
                         active_target_url = alias_url
+                else:
+                    # Auto-seed: Call accessUrl so ZAP registers the new target in the Sites Tree
+                    try:
+                        self._json("/JSON/core/action/accessUrl/", {"url": active_target_url})
+                    except Exception:
+                        pass
         except Exception:
             pass
 
