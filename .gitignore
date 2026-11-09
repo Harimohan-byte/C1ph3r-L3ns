@@ -37,5 +37,9 @@ SECREF/
 .agents/
 .codex/
 .specify/
+# Media source files (curated assets reside in assets/)
+*.mp4
+Registeration.png
+Nmap.png
 1.png
 Page-1.png
