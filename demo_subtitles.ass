@@ -1,0 +1,38 @@
+[Script Info]
+Title: Cipher-Lens Demonstration Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.601
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Segoe UI,30,&H00EBF6FB,&H00000000,&H0029230D,&H400D2329,-1,0,0,0,100,100,0,0,3,12,0,2,80,80,45,1
+Style: Accent,Segoe UI,30,&H0041FF00,&H00000000,&H0029230D,&H400D2329,-1,0,0,0,100,100,0,0,3,12,0,2,80,80,45,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:07.50,Accent,,0,0,0,,{\b1}CIPHER LENS{\b0}  |  AI Agent for Automated Penetration Testing
+Dialogue: 0,0:00:07.50,0:00:14.64,Default,,0,0,0,,{\b1}Step 1: Authorized Scope Registration{\b0} — Targets, ports, and strict exclusions are locked down before any tool runs.
+Dialogue: 0,0:00:14.64,0:00:22.64,Default,,0,0,0,,Mandatory human attestation ensures only authorized lab environments can be targeted.
+Dialogue: 0,0:00:22.64,0:00:34.00,Default,,0,0,0,,Scope token {\b1}#190e6f7f{\b0} generated with SHA-256 integrity hashing to lock engagement boundaries.
+Dialogue: 0,0:00:34.00,0:00:48.00,Default,,0,0,0,,{\b1}Step 2: Conversational Intake{\b0} — The analyst describes the objective in plain English without command-line flags.
+Dialogue: 0,0:00:48.00,0:00:56.64,Default,,0,0,0,,The dual-model AI planner (Google Gemini) evaluates registered scope and prior evidence.
+Dialogue: 0,0:00:56.64,0:01:04.64,Default,,0,0,0,,AI proposes Nmap service discovery. Safety gate verifies port and rate limits before sandboxed execution.
+Dialogue: 0,0:01:04.64,0:01:11.00,Default,,0,0,0,,{\b1}Step 3: Approved Scanning{\b0} — Nmap runs in a secure sandbox; raw XML is ingested to evidence vault.
+Dialogue: 0,0:01:11.00,0:01:17.64,Default,,0,0,0,,Port 80 confirmed open running Apache httpd. Finding recorded with raw evidence.
+Dialogue: 0,0:01:17.64,0:01:26.87,Accent,,0,0,0,,{\b1}Step 4: Adaptive Planning{\b0} — Next step adapts dynamically using newly observed Nmap evidence to target Apache.
+Dialogue: 0,0:01:26.87,0:01:36.87,Default,,0,0,0,,Nikto web configuration scan executes against confirmed HTTP service, detecting outdated components and header flaws.
+Dialogue: 0,0:01:36.87,0:01:42.89,Default,,0,0,0,,{\b1}Step 5: Web Application Mapping{\b0} — OWASP ZAP spider crawls endpoints to build the target site tree.
+Dialogue: 0,0:01:42.89,0:01:54.92,Default,,0,0,0,,Findings workbench aggregates evidence: anti-clickjacking headers, HTTP TRACE, and server version disclosures.
+Dialogue: 0,0:01:54.92,0:02:08.00,Accent,,0,0,0,,{\b1}Step 6: The Human Approval Gateway{\b0} — Active & offensive actions carry real operational risk that AI must never trigger alone.
+Dialogue: 0,0:02:08.00,0:02:20.00,Default,,0,0,0,,Autonomous AI is blocked by policy gate. Junior analyst submits an explicit approval request for ZAP active scanning.
+Dialogue: 0,0:02:20.00,0:02:32.92,Default,,0,0,0,,Senior analyst reviews scope and grants time-limited 15-minute token {\b1}#3d91bb7d{\b0}, recorded in audit chain.
+Dialogue: 0,0:02:32.92,0:02:48.92,Default,,0,0,0,,{\b1}Step 7: Gated Active Validation{\b0} — ZAP active scan executes with verified authorization token, validating vulnerabilities.
+Dialogue: 0,0:02:48.92,0:02:58.92,Default,,0,0,0,,{\b1}Step 8: Multi-Tool Ingestion{\b0} — External Nessus report parsed; findings jump to 26 with CVSS 10.0 and CVE enrichment.
+Dialogue: 0,0:02:58.92,0:03:08.92,Default,,0,0,0,,Severe vulnerabilities surfaced: Samba command execution (CVE-2007-2447), Debian OpenSSH flaw, and backdoor shell.
+Dialogue: 0,0:03:08.92,0:03:22.84,Default,,0,0,0,,OpenVAS report ingested. Cross-tool correlation engine deduplicates findings and maps to MITRE ATT&CK framework.
+Dialogue: 0,0:03:22.84,0:03:34.84,Default,,0,0,0,,{\b1}Step 9: Integration Truth{\b0} — Honest capability matrix disclosing 3 Live, 3 Import-Only, and 1 Planned tool adapter.
+Dialogue: 0,0:03:34.84,0:03:49.34,Accent,,0,0,0,,{\b1}Final Deliverable{\b0} — Professional 11-page executive VAPT report generated with ReportLab: verified and client-ready.
