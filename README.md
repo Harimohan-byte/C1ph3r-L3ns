@@ -4,7 +4,6 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Test Suite](https://img.shields.io/badge/test%20suite-109%20passed-brightgreen.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
 [![Governance](https://img.shields.io/badge/safety-human--in--the--loop-orange.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
 [![Tool Orchestration](https://img.shields.io/badge/scanners-5%20tools%20orchestrated-516D18.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
 [![UI Framework](https://img.shields.io/badge/interface-Streamlit%20mono-neon.svg)](https://streamlit.io/)
