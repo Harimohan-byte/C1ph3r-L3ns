@@ -16,7 +16,19 @@ from urllib.request import Request, urlopen
 from pydantic import ValidationError as PydanticValidationError
 
 from cipher_lens.config import ProviderSlot, provider_slots
-from cipher_lens.domain.models import ActionClass, PlanProposal, ProposalStatus, ScanProfile, ScopeRecord
+from cipher_lens.domain.models import (
+    ActionClass,
+    AdvisoryPayload,
+    AdvisoryToolRecommendation,
+    AgentResponse,
+    ConversationalPayload,
+    PlanProposal,
+    ProposalStatus,
+    ResponseType,
+    ScanProfile,
+    ScopeRecord,
+    ToolName,
+)
 from cipher_lens.domain.scope import is_in_scope, normalize_target
 from cipher_lens.domain.validation import parse_ports, port_in_ranges
 from cipher_lens.persistence.repositories import Repository
@@ -124,6 +136,7 @@ class ProposalOutcome:
     proposal: PlanProposal | None
     source: str
     reason: str
+    agent_response: AgentResponse | None = None
 
 
 class OpenAICompatibleClient:
@@ -202,32 +215,30 @@ def _seven_tools_prompt_catalog() -> str:
 def _messages(context: ProposalContext) -> list[dict[str, str]]:
     system = (
         "You are an expert, authorized VAPT security planner for authorized lab targets.\n"
-        "Select the next single assessment step based on the analyst request, scope, and discovered evidence.\n\n"
+        "Analyze the analyst request, scope, and discovered evidence to provide the appropriate response.\n\n"
         "Security Tool Catalog & Truthful Integration Statuses:\n"
         f"{_seven_tools_prompt_catalog()}\n\n"
-        "CRITICAL EXECUTION GUARDRAIL:\n"
-        "- The 'tool' field in your JSON response (and in anticipated_next_steps) must be one of: 'nmap', 'nikto', 'zap', 'nessus', or 'openvas'.\n"
-        "- For live automated scans, select 'nmap', 'nikto', or 'zap'.\n"
-        "- For infrastructure vulnerability report import, select 'nessus' or 'openvas' with profile 'import_report'.\n"
-        "- Never select Burp Suite or Metasploit in the 'tool' field.\n\n"
-        "Return ONLY one JSON object matching this exact schema:\n"
-        '{"tool":"nmap|nikto|zap|nessus|openvas","profile":"named_profile","target":"IPv4 or hostname",'
-        '"port":integer,"rationale":"evidence-grounded reason",'
-        '"anticipated_next_steps":[{"tool":"nmap|nikto|zap|nessus|openvas","profile":"named_profile",'
-        '"rationale":"non-binding preview"}]}\n\n'
-        "Allowed executable tools and profiles:\n"
-        "- nmap: quick_recon, service_version_scan, targeted_port_scan, full_port_scan, os_detection\n"
-        "- nikto: web_quick, quick_recon\n"
-        "- zap: web_quick, quick_recon, spider, active_scan\n"
-        "- nessus: import_report, quick_recon\n"
-        "- openvas: import_report, quick_recon\n\n"
-        "Guidelines:\n"
-        "1. For initial port discovery or general recon, choose tool 'nmap'.\n"
-        "2. When web services (HTTP, HTTPS, port 80, 443, 3000, 8080) are already discovered or requested, choose tool 'nikto' (profile 'web_quick').\n"
-        "3. When the analyst requests web application testing or active scanning, choose tool 'zap'.\n"
-        "4. When comprehensive infrastructure report import is requested, choose 'nessus' or 'openvas' (profile 'import_report').\n"
-        "5. target and port must strictly match the authorized scope.\n"
-        "6. Output raw JSON only with no markdown fences."
+        "RESPONSE TYPES:\n"
+        "You must respond in exactly ONE of three structured modes:\n\n"
+        "1. 'scan_proposal': Use when the analyst requests a specific scan or immediate testing action.\n"
+        "   Schema: {\"response_type\":\"scan_proposal\",\"scan_proposal\":{\"tool\":\"nmap|nikto|zap|nessus|openvas\",\"profile\":\"named_profile\",\"target\":\"IPv4 or hostname\",\"port\":integer,\"rationale\":\"reason\",\"anticipated_next_steps\":[{\"tool\":\"...\",\"profile\":\"...\",\"rationale\":\"...\"}]}}\n"
+        "   Allowed tools & profiles:\n"
+        "   - nmap: quick_recon, service_version_scan, targeted_port_scan, full_port_scan, os_detection\n"
+        "   - nikto: web_quick, quick_recon\n"
+        "   - zap: web_quick, quick_recon, spider, active_scan\n"
+        "   - nessus: import_report, quick_recon\n"
+        "   - openvas: import_report, quick_recon\n\n"
+        "2. 'advisory': Use when the analyst asks a broad strategic question ('what should I do next', 'how should I test for web vulnerabilities', 'where to start').\n"
+        "   Schema: {\"response_type\":\"advisory\",\"advisory\":{\"analysis\":\"strategic assessment grounded in evidence\",\"relevant_ports\":[integer],\"recommended_tools\":[{\"tool\":\"nmap|nikto|zap|nessus|openvas\",\"profile\":\"named_profile\",\"port\":integer,\"rationale\":\"reason\"}],\"directional_guidance\":\"optional directional follow-up note\"}}\n"
+        "   CRITICAL ADVISORY RULES:\n"
+        "   - 'relevant_ports' must only contain ports already discovered in evidence or explicitly registered in scope. Never invent ports.\n"
+        "   - 'recommended_tools' must only recommend our integrated tools (nmap, nikto, zap, nessus, openvas).\n"
+        "   - 'directional_guidance' may optionally mention manual outside-the-workflow tools (Burp Suite, Metasploit) in a purely directional manner (e.g., 'version documented with historical RCE issues — worth manual validation via Metasploit outside this workflow').\n"
+        "   - NEVER include exploit payloads, attack code, module names, or how-to exploitation steps.\n"
+        "   - NEVER assert specific CVEs or CVSS scores in advisory mode; present background knowledge as general software context, never as a confirmed finding on this target.\n\n"
+        "3. 'conversational': Use for simple greetings, persona inquiries, or non-task small talk (e.g. 'hi', 'who are you').\n"
+        "   Schema: {\"response_type\":\"conversational\",\"conversational\":{\"message\":\"short in-character reply\"}}\n\n"
+        "Output raw JSON only with no markdown fences."
     )
     user = (
         f"Authorized scope target: {context.scope.canonical_target}\n"
@@ -240,44 +251,80 @@ def _messages(context: ProposalContext) -> list[dict[str, str]]:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def _parse_provider_proposal(raw: str) -> PlanProposal:
+def _normalize_tool_dict(data: dict[str, Any]) -> None:
+    tool_raw = str(data.get("tool", "")).lower().strip()
+    if "openvas" in tool_raw or "greenbone" in tool_raw:
+        data["tool"] = "openvas"
+    elif "nessus" in tool_raw:
+        data["tool"] = "nessus"
+    elif tool_raw == "nikto":
+        data["tool"] = "nikto"
+    elif tool_raw == "zap":
+        data["tool"] = "zap"
+    elif tool_raw == "nmap":
+        data["tool"] = "nmap"
+
+    prof_raw = str(data.get("profile", "")).lower().strip()
+    if "import" in prof_raw:
+        data["profile"] = "import_report"
+
+    if "anticipated_next_steps" in data and isinstance(data["anticipated_next_steps"], list):
+        for step in data["anticipated_next_steps"]:
+            if isinstance(step, dict):
+                s_tool = str(step.get("tool", "")).lower().strip()
+                if "openvas" in s_tool or "greenbone" in s_tool:
+                    step["tool"] = "openvas"
+                elif "nessus" in s_tool:
+                    step["tool"] = "nessus"
+                s_prof = str(step.get("profile", "")).lower().strip()
+                if "import" in s_prof:
+                    step["profile"] = "import_report"
+
+
+def _parse_provider_proposal(raw: str) -> AgentResponse:
     cleaned = _clean_json_content(raw)
     try:
         data = json.loads(cleaned)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise ProviderFailure("schema_rejection") from error
 
-    if isinstance(data, dict):
-        tool_raw = str(data.get("tool", "")).lower().strip()
-        if "openvas" in tool_raw or "greenbone" in tool_raw:
-            data["tool"] = "openvas"
-        elif "nessus" in tool_raw:
-            data["tool"] = "nessus"
-        elif tool_raw == "nikto":
-            data["tool"] = "nikto"
-        elif tool_raw == "zap":
-            data["tool"] = "zap"
-        elif tool_raw == "nmap":
-            data["tool"] = "nmap"
+    if not isinstance(data, dict):
+        raise ProviderFailure("schema_rejection")
 
-        prof_raw = str(data.get("profile", "")).lower().strip()
-        if "import" in prof_raw:
-            data["profile"] = "import_report"
+    # If top-level response_type is specified:
+    if "response_type" in data:
+        resp_type = str(data.get("response_type", "")).strip().lower()
+        if resp_type == ResponseType.SCAN_PROPOSAL.value:
+            sp = data.get("scan_proposal")
+            if isinstance(sp, dict):
+                _normalize_tool_dict(sp)
+            try:
+                return AgentResponse.model_validate(data)
+            except PydanticValidationError as error:
+                raise ProviderFailure("schema_rejection") from error
+        elif resp_type == ResponseType.ADVISORY.value:
+            adv = data.get("advisory")
+            if isinstance(adv, dict) and "recommended_tools" in adv and isinstance(adv["recommended_tools"], list):
+                for rec in adv["recommended_tools"]:
+                    if isinstance(rec, dict):
+                        _normalize_tool_dict(rec)
+            try:
+                return AgentResponse.model_validate(data)
+            except PydanticValidationError as error:
+                raise ProviderFailure("schema_rejection") from error
+        elif resp_type == ResponseType.CONVERSATIONAL.value:
+            try:
+                return AgentResponse.model_validate(data)
+            except PydanticValidationError as error:
+                raise ProviderFailure("schema_rejection") from error
+        else:
+            raise ProviderFailure("schema_rejection")
 
-        if "anticipated_next_steps" in data and isinstance(data["anticipated_next_steps"], list):
-            for step in data["anticipated_next_steps"]:
-                if isinstance(step, dict):
-                    s_tool = str(step.get("tool", "")).lower().strip()
-                    if "openvas" in s_tool or "greenbone" in s_tool:
-                        step["tool"] = "openvas"
-                    elif "nessus" in s_tool:
-                        step["tool"] = "nessus"
-                    s_prof = str(step.get("profile", "")).lower().strip()
-                    if "import" in s_prof:
-                        step["profile"] = "import_report"
-
+    # Legacy flat PlanProposal dict support: auto-wrap into AgentResponse
+    _normalize_tool_dict(data)
     try:
-        return PlanProposal.model_validate(data)
+        prop = PlanProposal.model_validate(data)
+        return AgentResponse(response_type=ResponseType.SCAN_PROPOSAL, scan_proposal=prop)
     except PydanticValidationError as error:
         raise ProviderFailure("schema_rejection") from error
 
@@ -287,7 +334,8 @@ def _schema_correction_message() -> dict[str, str]:
         "role": "user",
         "content": (
             "Your previous response was invalid. Return only one JSON object matching the exact schema "
-            "from the system instruction. Do not include markdown, extra fields, flags, arguments, or findings."
+            "from the system instruction (with 'response_type' set to 'scan_proposal', 'advisory', or 'conversational'). "
+            "Do not include markdown fences, extra fields, flags, arguments, or raw unvalidated text."
         ),
     }
 
@@ -301,64 +349,129 @@ def _first_permitted_port(scope: ScopeRecord) -> int | None:
     return None
 
 
-def deterministic_fallback(context: ProposalContext) -> PlanProposal:
-    """Safe local proposal used when configured AI providers are unavailable."""
+def deterministic_fallback(context: ProposalContext) -> AgentResponse:
+    """Safe local response used when configured AI providers are unavailable."""
+    req = context.request.lower().strip()
+    ev = context.evidence_summary.lower()
+
+    # 1. Conversational intent (greetings / identity / small talk)
+    greetings = {"hi", "hello", "hey", "who are you", "who are u", "what are you", "help", "good morning", "good evening"}
+    if any(req == g or req.startswith(f"{g} ") or req.startswith(f"{g},") for g in greetings):
+        return AgentResponse(
+            response_type=ResponseType.CONVERSATIONAL,
+            conversational=ConversationalPayload(
+                message="Hello! I am Cipher-Lens, your human-supervised VAPT security agent. "
+                        "I can propose targeted scans, offer advisory recommendations based on discovered evidence, "
+                        "or guide your assessment. How can I assist with this target today?"
+            ),
+        )
+
+    # 2. Advisory intent (broad requests, 'what should i do', 'what next', 'recommend', 'advice', 'test web')
+    advisory_keywords = {"what should i do", "what next", "what to do", "recommend", "advice", "advise", "how to test", "where should i start"}
+    is_exploratory = any(k in req for k in advisory_keywords) or (
+        ("test" in req or "check" in req)
+        and not any(t in req for t in ["nmap", "nikto", "zap", "nessus", "openvas", "port 80", "port 443", "port 3000"])
+    )
+    if is_exploratory:
+        port = _first_permitted_port(context.scope)
+        relevant_ports = [port] if port is not None else []
+        recs: list[AdvisoryToolRecommendation] = []
+        directional = None
+
+        if "http" in ev or "open" in ev:
+            analysis = (
+                f"Discovered reconnaissance evidence indicates active network services on {context.scope.canonical_target}. "
+                "Web service ports are responsive and ready for configuration inspection and application assessment."
+            )
+            if port:
+                recs.append(AdvisoryToolRecommendation(
+                    tool=ToolName.NIKTO,
+                    profile=ScanProfile.WEB_QUICK,
+                    port=port,
+                    rationale="Inspect web server configuration, headers, and known security issues."
+                ))
+                recs.append(AdvisoryToolRecommendation(
+                    tool=ToolName.ZAP,
+                    profile=ScanProfile.QUICK_RECON,
+                    port=port,
+                    rationale="Spider the web application and discover endpoint attack surface."
+                ))
+            directional = (
+                "For deeper application testing or authenticated endpoints, manual proxy testing via Burp Suite "
+                "or controlled validation via Metasploit may be conducted outside this automated workflow."
+            )
+        else:
+            analysis = (
+                f"No service evidence has been collected yet for {context.scope.canonical_target}. "
+                "Initial network reconnaissance is recommended to establish host availability and open port topology."
+            )
+            if port:
+                recs.append(AdvisoryToolRecommendation(
+                    tool=ToolName.NMAP,
+                    profile=ScanProfile.QUICK_RECON,
+                    port=port,
+                    rationale="Establish initial port and service availability across registered scope."
+                ))
+
+        return AgentResponse(
+            response_type=ResponseType.ADVISORY,
+            advisory=AdvisoryPayload(
+                analysis=analysis,
+                relevant_ports=relevant_ports,
+                recommended_tools=recs,
+                directional_guidance=directional,
+            ),
+        )
+
+    # 3. Specific scan proposals (existing fallback behavior)
     port = _first_permitted_port(context.scope)
     if port is None:
         raise ProviderFailure("no_permitted_port_for_local_fallback")
 
-    req = context.request.lower()
-    ev = context.evidence_summary.lower()
-
-    # If the analyst asks for Nessus report import:
     if "nessus" in req:
-        return PlanProposal(
-            tool="nessus",
-            profile="import_report",
+        proposal = PlanProposal(
+            tool=ToolName.NESSUS,
+            profile=ScanProfile.IMPORT_REPORT,
             target=context.scope.canonical_target,
             port=port,
             rationale="Analyst requested Nessus Essentials scan report import.",
         )
-
-    # If the analyst asks for OpenVAS / Greenbone report import:
-    if any(k in req for k in ["openvas", "greenbone"]):
-        return PlanProposal(
-            tool="openvas",
-            profile="import_report",
+    elif any(k in req for k in ["openvas", "greenbone"]):
+        proposal = PlanProposal(
+            tool=ToolName.OPENVAS,
+            profile=ScanProfile.IMPORT_REPORT,
             target=context.scope.canonical_target,
             port=port,
             rationale="Analyst requested OpenVAS / Greenbone GMP XML report import.",
         )
-
-    # If the analyst asks for web / nikto scanning or HTTP was already discovered:
-    if any(k in req for k in ["nikto", "web", "http", "header", "misconfig", "juice"]) or (
+    elif any(k in req for k in ["nikto", "web", "http", "header", "misconfig", "juice"]) or (
         "http" in ev or "open" in ev
     ):
-        return PlanProposal(
-            tool="nikto",
-            profile="web_quick",
+        proposal = PlanProposal(
+            tool=ToolName.NIKTO,
+            profile=ScanProfile.WEB_QUICK,
             target=context.scope.canonical_target,
             port=port,
             rationale="Discovered HTTP service or web assessment objective indicates web server inspection using Nikto.",
         )
-
-    # If the analyst asks for ZAP / active scanning / spider:
-    if any(k in req for k in ["zap", "spider", "active", "api"]):
-        return PlanProposal(
-            tool="zap",
-            profile="quick_recon",
+    elif any(k in req for k in ["zap", "spider", "active", "api"]):
+        proposal = PlanProposal(
+            tool=ToolName.ZAP,
+            profile=ScanProfile.QUICK_RECON,
             target=context.scope.canonical_target,
             port=port,
             rationale="Analyst requested web application vulnerability scan using OWASP ZAP.",
         )
+    else:
+        proposal = PlanProposal(
+            tool=ToolName.NMAP,
+            profile=ScanProfile.QUICK_RECON,
+            target=context.scope.canonical_target,
+            port=port,
+            rationale="A scoped quick reconnaissance step can establish service evidence before any further proposal.",
+        )
 
-    return PlanProposal(
-        tool="nmap",
-        profile="quick_recon",
-        target=context.scope.canonical_target,
-        port=port,
-        rationale="A scoped quick reconnaissance step can establish service evidence before any further proposal.",
-    )
+    return AgentResponse(response_type=ResponseType.SCAN_PROPOSAL, scan_proposal=proposal)
 
 
 def _record_transition(repository: Repository, source: str, reason: str) -> None:
@@ -377,7 +490,7 @@ def generate_proposal(
     *,
     slots: Sequence[ProviderSlot] | None = None,
     client: CompletionClient | None = None,
-) -> tuple[PlanProposal, str]:
+) -> tuple[AgentResponse, str]:
     """Try configured providers in order, auditing every safe failover, then use local fallback."""
     active_slots = list(provider_slots() if slots is None else slots)
     completion_client = client or OpenAICompatibleClient()
@@ -399,8 +512,15 @@ def generate_proposal(
                 )
                 raw = completion_client.complete(slot, messages)
                 print(f"[CIPHER LENS AI] Response received from {slot.label} ({len(raw)} chars)", flush=True)
-                proposal = _parse_provider_proposal(raw)
-                print(f"[CIPHER LENS AI] ✓ LLM proposal accepted: Tool={proposal.tool.value.upper()}, Profile={proposal.profile.value}, Target={proposal.target}:{proposal.port}", flush=True)
+                agent_resp = _parse_provider_proposal(raw)
+                if agent_resp.response_type == ResponseType.SCAN_PROPOSAL and agent_resp.scan_proposal:
+                    sp = agent_resp.scan_proposal
+                    print(f"[CIPHER LENS AI] ✓ LLM proposal accepted: Tool={sp.tool.value.upper()}, Profile={sp.profile.value}, Target={sp.target}:{sp.port}", flush=True)
+                elif agent_resp.response_type == ResponseType.ADVISORY and agent_resp.advisory:
+                    adv = agent_resp.advisory
+                    print(f"[CIPHER LENS AI] ✓ LLM advisory accepted: Ports={adv.relevant_ports}, Tools={[t.tool.value for t in adv.recommended_tools]}", flush=True)
+                elif agent_resp.response_type == ResponseType.CONVERSATIONAL:
+                    print(f"[CIPHER LENS AI] ✓ LLM conversational reply accepted", flush=True)
             except ProviderFailure as error:
                 print(f"[CIPHER LENS AI] Provider failure on {slot.label} (attempt {attempt}): {error.reason}", flush=True)
                 if error.reason == "schema_rejection" and attempt < SCHEMA_ATTEMPT_CAP:
@@ -422,11 +542,11 @@ def generate_proposal(
                 entity_type="plan_proposal",
                 detail={"source": slot.label, "attempt": attempt},
             )
-            return proposal, slot.label
+            return agent_resp, slot.label
 
     print("[CIPHER LENS AI] Using local deterministic planner...", flush=True)
     try:
-        proposal = deterministic_fallback(context)
+        agent_resp = deterministic_fallback(context)
     except ProviderFailure as error:
         _record_transition(repository, "deterministic_fallback", error.reason)
         raise
@@ -437,20 +557,111 @@ def generate_proposal(
         entity_type="plan_proposal",
         detail={"source": "deterministic_fallback"},
     )
-    print(f"[CIPHER LENS AI] ✓ Deterministic proposal: Tool={proposal.tool.value.upper()}, Profile={proposal.profile.value}, Target={proposal.target}:{proposal.port}", flush=True)
-    return proposal, "deterministic_fallback"
+    if agent_resp.response_type == ResponseType.SCAN_PROPOSAL and agent_resp.scan_proposal:
+        sp = agent_resp.scan_proposal
+        print(f"[CIPHER LENS AI] ✓ Deterministic proposal: Tool={sp.tool.value.upper()}, Profile={sp.profile.value}, Target={sp.target}:{sp.port}", flush=True)
+    elif agent_resp.response_type == ResponseType.ADVISORY and agent_resp.advisory:
+        adv = agent_resp.advisory
+        print(f"[CIPHER LENS AI] ✓ Deterministic advisory: Ports={adv.relevant_ports}, Tools={[t.tool.value for t in adv.recommended_tools]}", flush=True)
+    else:
+        print(f"[CIPHER LENS AI] ✓ Deterministic conversational reply", flush=True)
+    return agent_resp, "deterministic_fallback"
 
 
 def gate_proposal(
     repository: Repository,
     context: ProposalContext,
-    proposal: PlanProposal,
+    proposal: PlanProposal | AgentResponse,
     source: str,
     *,
     action: ActionClass = ActionClass.RECON,
     rate_limit_check: RateLimitCheck | None = None,
 ) -> ProposalOutcome:
     """Apply policy after AI proposal generation; no adapter is reachable from this function."""
+    if isinstance(proposal, AgentResponse):
+        agent_resp = proposal
+    else:
+        agent_resp = AgentResponse(response_type=ResponseType.SCAN_PROPOSAL, scan_proposal=proposal)
+
+    # 1. Conversational mode: small talk / greeting — no tool, scope, or rate limits needed
+    if agent_resp.response_type == ResponseType.CONVERSATIONAL:
+        record(
+            repository,
+            event_type="ai_conversational",
+            outcome="provided",
+            entity_type="agent_response",
+            detail={"source": source},
+        )
+        return ProposalOutcome(
+            status=ProposalStatus.APPROVED,
+            proposal=None,
+            source=source,
+            reason="Conversational response.",
+            agent_response=agent_resp,
+        )
+
+    # 2. Advisory mode: strategic guidance grounded strictly in authorized scope and recon evidence
+    if agent_resp.response_type == ResponseType.ADVISORY:
+        adv = agent_resp.advisory
+        if adv is None:
+            return _rejected(repository, None, source, "Malformed advisory payload.", "schema_check", agent_response=agent_resp)
+
+        # Enforce that all relevant_ports are permitted in the registered scope
+        for port in adv.relevant_ports:
+            allowed, reason = is_in_scope(context.scope, context.scope.canonical_target, port, ActionClass.RECON)
+            if not allowed:
+                return _rejected(
+                    repository,
+                    None,
+                    source,
+                    f"Advisory referenced port {port} not permitted by registered scope: {reason}",
+                    "scope_check",
+                    agent_response=agent_resp,
+                )
+
+        # Check recommended tools and their ports
+        for rec in adv.recommended_tools:
+            if rec.port is not None:
+                allowed, reason = is_in_scope(context.scope, context.scope.canonical_target, rec.port, ActionClass.RECON)
+                if not allowed:
+                    return _rejected(
+                        repository,
+                        None,
+                        source,
+                        f"Advisory recommended tool port {rec.port} not permitted by registered scope: {reason}",
+                        "scope_check",
+                        agent_response=agent_resp,
+                    )
+
+        # Audit the advisory event (separate event_type, never writes to findings)
+        record(
+            repository,
+            event_type="ai_advisory",
+            outcome="provided",
+            entity_type="agent_response",
+            detail={
+                "source": source,
+                "relevant_ports": adv.relevant_ports,
+                "recommended_tools": [
+                    {"tool": r.tool.value, "profile": r.profile.value, "port": r.port, "rationale": r.rationale}
+                    for r in adv.recommended_tools
+                ],
+                "has_directional_guidance": bool(adv.directional_guidance),
+            },
+        )
+        return ProposalOutcome(
+            status=ProposalStatus.APPROVED,
+            proposal=None,
+            source=source,
+            reason="Advisory recommendation validated against registered scope.",
+            agent_response=agent_resp,
+        )
+
+    # 3. Scan proposal mode: standard pipeline
+    plan_prop = agent_resp.scan_proposal
+    if plan_prop is None:
+        return _rejected(repository, None, source, "Malformed scan proposal payload.", "schema_check", agent_response=agent_resp)
+
     record(
         repository,
         event_type="plan_proposal",
@@ -458,22 +669,29 @@ def gate_proposal(
         entity_type="plan_proposal",
         detail={
             "source": source,
-            "tool": proposal.tool.value,
-            "profile": proposal.profile.value,
-            "port": proposal.port,
-            "anticipated_next_steps": [step.model_dump(mode="json") for step in proposal.anticipated_next_steps],
+            "tool": plan_prop.tool.value,
+            "profile": plan_prop.profile.value,
+            "port": plan_prop.port,
+            "anticipated_next_steps": [step.model_dump(mode="json") for step in plan_prop.anticipated_next_steps],
         },
     )
-    if normalize_target(proposal.target) != context.scope.canonical_target:
+    if normalize_target(plan_prop.target) != context.scope.canonical_target:
         reason = "Proposal target does not match the active scope."
-        return _rejected(repository, proposal, source, reason, "target_match")
-    allowed, reason = is_in_scope(context.scope, proposal.target, proposal.port, action)
+        return _rejected(repository, plan_prop, source, reason, "target_match", agent_response=agent_resp)
+    allowed, reason = is_in_scope(context.scope, plan_prop.target, plan_prop.port, action)
     if not allowed:
-        return _rejected(repository, proposal, source, reason, "scope_check")
-    allowed_profiles = ALLOWED_PROFILES_BY_TOOL.get(proposal.tool.value, set())
-    if proposal.profile.value not in allowed_profiles:
-        return _rejected(repository, proposal, source, f"Profile '{proposal.profile.value}' is not allow-listed for {proposal.tool.value}.", "profile_allowlist")
-    rate_decision = (rate_limit_check or _default_rate_limiter)(context.scope, proposal, action)
+        return _rejected(repository, plan_prop, source, reason, "scope_check", agent_response=agent_resp)
+    allowed_profiles = ALLOWED_PROFILES_BY_TOOL.get(plan_prop.tool.value, set())
+    if plan_prop.profile.value not in allowed_profiles:
+        return _rejected(
+            repository,
+            plan_prop,
+            source,
+            f"Profile '{plan_prop.profile.value}' is not allow-listed for {plan_prop.tool.value}.",
+            "profile_allowlist",
+            agent_response=agent_resp,
+        )
+    rate_decision = (rate_limit_check or _default_rate_limiter)(context.scope, plan_prop, action)
     record(
         repository,
         event_type="proposal_rate_limit",
@@ -481,8 +699,8 @@ def gate_proposal(
         entity_type="plan_proposal",
         detail={
             "source": source,
-            "target": normalize_target(proposal.target),
-            "port": proposal.port,
+            "target": normalize_target(plan_prop.target),
+            "port": plan_prop.port,
             "action": action.value,
             "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
             "remaining_wait_seconds": rate_decision.remaining_seconds,
@@ -492,13 +710,13 @@ def gate_proposal(
     )
     if not rate_decision.allowed:
         print(f"[CIPHER LENS GATE] Rate limit check: BLOCKED — {rate_decision.reason}", flush=True)
-        return _blocked(repository, proposal, source, rate_decision.reason)
+        return _blocked(repository, plan_prop, source, rate_decision.reason, agent_response=agent_resp)
     if action == ActionClass.ACTIVE_VALIDATION:
         # Check if an active, non-expired human approval exists in the repository
         approved_records = repository.list_approvals(context.scope.id, status="approved")
         matched_approval = None
         for app in approved_records:
-            if app.target == normalize_target(proposal.target) and (app.port is None or app.port == proposal.port):
+            if app.target == normalize_target(plan_prop.target) and (app.port is None or app.port == plan_prop.port):
                 if app.expires_at:
                     try:
                         exp = datetime.fromisoformat(app.expires_at)
@@ -522,39 +740,70 @@ def gate_proposal(
     else:
         status = ProposalStatus.APPROVED
         reason = "Schema, scope, profile, and rate-limit gates passed."
-    print(f"[CIPHER LENS GATE] Gate check for {proposal.tool.value.upper()} on {proposal.target}:{proposal.port} ({action.value}): {status.value.upper()}", flush=True)
+    print(f"[CIPHER LENS GATE] Gate check for {plan_prop.tool.value.upper()} on {plan_prop.target}:{plan_prop.port} ({action.value}): {status.value.upper()}", flush=True)
     record(
         repository,
         event_type="proposal_gate",
         outcome=status.value,
         entity_type="plan_proposal",
-        detail={"source": source, "target": proposal.target, "port": proposal.port, "action": action.value, "reason": reason},
+        detail={"source": source, "target": plan_prop.target, "port": plan_prop.port, "action": action.value, "reason": reason},
     )
-    return ProposalOutcome(status=status, proposal=proposal, source=source, reason=reason)
+    return ProposalOutcome(status=status, proposal=plan_prop, source=source, reason=reason, agent_response=agent_resp)
 
 
 def _rejected(
-    repository: Repository, proposal: PlanProposal, source: str, reason: str, gate: str
+    repository: Repository,
+    proposal: PlanProposal | None,
+    source: str,
+    reason: str,
+    gate: str,
+    agent_response: AgentResponse | None = None,
 ) -> ProposalOutcome:
+    detail: dict[str, Any] = {"source": source, "gate": gate, "reason": reason}
+    if proposal:
+        detail["target"] = proposal.target
+        detail["port"] = proposal.port
     record(
         repository,
         event_type="proposal_gate",
         outcome="rejected",
-        entity_type="plan_proposal",
-        detail={"source": source, "target": proposal.target, "port": proposal.port, "gate": gate, "reason": reason},
+        entity_type="agent_response" if agent_response and not proposal else "plan_proposal",
+        detail=detail,
     )
-    return ProposalOutcome(status=ProposalStatus.REJECTED, proposal=proposal, source=source, reason=reason)
+    return ProposalOutcome(
+        status=ProposalStatus.REJECTED,
+        proposal=proposal,
+        source=source,
+        reason=reason,
+        agent_response=agent_response,
+    )
 
 
-def _blocked(repository: Repository, proposal: PlanProposal, source: str, reason: str) -> ProposalOutcome:
+def _blocked(
+    repository: Repository,
+    proposal: PlanProposal | None,
+    source: str,
+    reason: str,
+    agent_response: AgentResponse | None = None,
+) -> ProposalOutcome:
+    detail: dict[str, Any] = {"source": source, "gate": "rate_limit", "reason": reason}
+    if proposal:
+        detail["target"] = proposal.target
+        detail["port"] = proposal.port
     record(
         repository,
         event_type="proposal_gate",
         outcome=ProposalStatus.BLOCKED.value,
-        entity_type="plan_proposal",
-        detail={"source": source, "target": proposal.target, "port": proposal.port, "gate": "rate_limit", "reason": reason},
+        entity_type="agent_response" if agent_response and not proposal else "plan_proposal",
+        detail=detail,
     )
-    return ProposalOutcome(status=ProposalStatus.BLOCKED, proposal=proposal, source=source, reason=reason)
+    return ProposalOutcome(
+        status=ProposalStatus.BLOCKED,
+        proposal=proposal,
+        source=source,
+        reason=reason,
+        agent_response=agent_response,
+    )
 
 
 def propose_and_gate(
@@ -566,12 +815,14 @@ def propose_and_gate(
     action: ActionClass = ActionClass.RECON,
     rate_limit_check: RateLimitCheck | None = None,
 ) -> ProposalOutcome:
-    proposal, source = generate_proposal(repository, context, slots=slots, client=client)
+    agent_resp, source = generate_proposal(repository, context, slots=slots, client=client)
     effective_action = action
-    if proposal.tool.value == "zap" and proposal.profile.value == "active_scan":
-        effective_action = ActionClass.ACTIVE_VALIDATION
-    elif proposal.profile == ScanProfile.OS_DETECTION:
-        effective_action = ActionClass.ACTIVE_VALIDATION
+    if agent_resp.response_type == ResponseType.SCAN_PROPOSAL and agent_resp.scan_proposal:
+        p = agent_resp.scan_proposal
+        if p.tool.value == "zap" and p.profile.value == "active_scan":
+            effective_action = ActionClass.ACTIVE_VALIDATION
+        elif p.profile == ScanProfile.OS_DETECTION:
+            effective_action = ActionClass.ACTIVE_VALIDATION
     return gate_proposal(
-        repository, context, proposal, source, action=effective_action, rate_limit_check=rate_limit_check
+        repository, context, agent_resp, source, action=effective_action, rate_limit_check=rate_limit_check
     )

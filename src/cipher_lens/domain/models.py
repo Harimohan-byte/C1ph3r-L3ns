@@ -7,8 +7,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic import StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from cipher_lens.domain.validation import validate_target
 from cipher_lens.domain.findings import (
@@ -79,6 +78,71 @@ class PlanProposal(BaseModel):
         if not 1 <= value <= 65535:
             raise ValueError("Port must be between 1 and 65535.")
         return value
+
+
+class ResponseType(StrEnum):
+    SCAN_PROPOSAL = "scan_proposal"
+    ADVISORY = "advisory"
+    CONVERSATIONAL = "conversational"
+
+
+class AdvisoryToolRecommendation(BaseModel):
+    """Integrated tool recommendation in an advisory response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: ToolName
+    profile: ScanProfile
+    port: StrictInt
+    rationale: str = Field(min_length=1, max_length=500)
+
+
+class AdvisoryPayload(BaseModel):
+    """Structured security advisory guidance grounded in discovered scope recon."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    analysis: str = Field(min_length=1, max_length=2_000)
+    relevant_ports: list[StrictInt] = Field(default_factory=list)
+    recommended_tools: list[AdvisoryToolRecommendation] = Field(default_factory=list)
+    directional_guidance: str | None = Field(default=None, max_length=1_000)
+
+
+class ConversationalPayload(BaseModel):
+    """In-character conversational reply for non-task user interactions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=1_000)
+
+
+class AgentResponse(BaseModel):
+    """Discriminated top-level agent response supporting scan proposals, advisories, and chat."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    response_type: ResponseType
+    scan_proposal: PlanProposal | None = None
+    advisory: AdvisoryPayload | None = None
+    conversational: ConversationalPayload | None = None
+
+    @model_validator(mode="after")
+    def validate_payload_matches_type(self) -> AgentResponse:
+        if self.response_type == ResponseType.SCAN_PROPOSAL:
+            if self.scan_proposal is None:
+                raise ValueError("scan_proposal payload is required when response_type is 'scan_proposal'.")
+        elif self.response_type == ResponseType.ADVISORY:
+            if self.advisory is None:
+                raise ValueError("advisory payload is required when response_type is 'advisory'.")
+        elif self.response_type == ResponseType.CONVERSATIONAL:
+            if self.conversational is None:
+                raise ValueError("conversational payload is required when response_type is 'conversational'.")
+        return self
+
+    @property
+    def proposal(self) -> PlanProposal | None:
+        """Convenience accessor to the underlying PlanProposal when in scan_proposal mode."""
+        return self.scan_proposal
 
 
 class ProposalStatus(StrEnum):

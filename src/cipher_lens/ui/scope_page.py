@@ -99,6 +99,39 @@ def render(repository: Repository) -> None:
             unsafe_allow_html=True,
         )
 
+    with st.expander("🗑️ Delete a registered scope", expanded=True if len(scopes) == 1 else False):
+        st.caption("Permanently remove a single scope and its associated scan runs, findings, and evidence.")
+        col_scope_sel, col_del_btn = st.columns([3, 1])
+        with col_scope_sel:
+            scope_to_delete = st.selectbox(
+                "Select scope to remove",
+                scopes,
+                format_func=lambda s: f"{s.canonical_target} (Ports: {s.allowed_ports})",
+                key="scope_delete_selectbox",
+                label_visibility="collapsed",
+            )
+        with col_del_btn:
+            if st.button("🗑 Delete Scope", key="delete_single_scope_btn", type="secondary"):
+                if scope_to_delete:
+                    try:
+                        from cipher_lens.config import data_directory
+                        import shutil
+                        art_path = data_directory() / "artifacts" / scope_to_delete.id
+                        if art_path.exists():
+                            shutil.rmtree(art_path, ignore_errors=True)
+                    except Exception:
+                        pass
+
+                    repository.delete_scope(scope_to_delete.id)
+                    if st.session_state.get("last_proposal_scope_id") == scope_to_delete.id:
+                        st.session_state.pop("last_proposal", None)
+                        st.session_state.pop("last_proposal_scope_id", None)
+                        st.session_state.pop("last_proposal_executed", None)
+                        st.session_state.pop("last_scan_msg", None)
+                    st.success(f"Scope '{scope_to_delete.canonical_target}' and all its associated data deleted.")
+                    time.sleep(0.5)
+                    st.rerun()
+
     with st.expander("Reset lab database (start fresh)", expanded=False):
         st.caption("Remove all registered scopes, scan runs, findings, and approvals to begin a clean demonstration.")
         if st.button("Reset all lab data", type="secondary", key="reset_lab_data_btn"):
