@@ -461,6 +461,19 @@ class Repository:
             )
         return results
 
+    def delete_scope(self, scope_id: str) -> None:
+        """Delete a single scope and all its associated scan runs, findings, evidence, and approvals."""
+        with self.connection() as connection:
+            rows = connection.execute("SELECT id FROM scan_runs WHERE scope_id = ?", (scope_id,)).fetchall()
+            run_ids = [row["id"] for row in rows]
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                connection.execute(f"DELETE FROM findings WHERE scan_run_id IN ({placeholders})", run_ids)
+                connection.execute(f"DELETE FROM evidence WHERE scan_run_id IN ({placeholders})", run_ids)
+            connection.execute("DELETE FROM approvals WHERE scope_id = ?", (scope_id,))
+            connection.execute("DELETE FROM scan_runs WHERE scope_id = ?", (scope_id,))
+            connection.execute("DELETE FROM scopes WHERE id = ?", (scope_id,))
+
     def reset_database(self) -> None:
         """Clear all stored data for lab reset/fresh demonstration."""
         with self.connection() as connection:

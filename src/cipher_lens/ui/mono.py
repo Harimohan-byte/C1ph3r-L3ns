@@ -52,11 +52,45 @@ def apply_tokens() -> None:
           .stApp { background: var(--cl-surface); color: var(--cl-text); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
           h1, h2, h3, p, label, div, button, input, textarea { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
           code, pre, .cl-tech, .cl-status { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
-          [data-testid="stSidebar"] { background: var(--cl-rail); border-right: 1px solid #2A2A2A; }
-          [data-testid="stSidebar"] * { color: var(--cl-rail-text); }
-          [data-testid="stSidebar"] [role="radiogroup"] { gap: 0.4rem; }
-          [data-testid="stSidebar"] label { min-height: 44px; border-radius: 10px; padding: 0.55rem 0.65rem; }
-          [data-testid="stSidebar"] label:hover { background: #272727; }
+          [data-testid="stSidebar"] {
+              background: #0A110D !important;
+              border-right: 1.5px solid #1C2B1E !important;
+          }
+          [data-testid="stSidebar"] * {
+              color: #E3EDE0;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] {
+              gap: 0.5rem;
+              margin-top: 0.4rem;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] > label {
+              min-height: 44px;
+              border-radius: 10px !important;
+              padding: 0.6rem 0.75rem !important;
+              background: #111A13 !important;
+              border: 1px solid #1D2E20 !important;
+              transition: all 0.15s ease-in-out;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] > label:hover {
+              background: #18261C !important;
+              border-color: #3B5B3E !important;
+              color: #FFFFFF !important;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] > label:has(input:checked) {
+              background: #18381D !important;
+              border: 1.5px solid #BBF351 !important;
+              border-left: 4px solid #BBF351 !important;
+              box-shadow: 0 0 12px rgba(187, 243, 81, 0.2) !important;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] > label:has(input:checked) p,
+          [data-testid="stSidebar"] [role="radiogroup"] > label:has(input:checked) span {
+              color: #BBF351 !important;
+              font-weight: 800 !important;
+          }
+          [data-testid="stSidebar"] [role="radiogroup"] input[type="radio"]:checked + div {
+              border-color: #BBF351 !important;
+              background-color: #BBF351 !important;
+          }
           [data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] { border: 1px solid var(--cl-line); background: var(--cl-panel); border-radius: 18px; padding: 1.25rem; box-shadow: 0 10px 28px rgba(77, 57, 28, 0.08); }
           [data-testid="stForm"] { margin-top: 1rem; }
           .cl-kicker { color: #516D18; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -175,9 +209,60 @@ def apply_tokens() -> None:
           .cl-status-running, .cl-status-parsing { color: var(--cl-info); border-color: #84ADFF; background: #F0F5FF; }
           .cl-status-failed, .cl-status-blocked { color: var(--cl-danger); border-color: #F3A6A0; background: #FFF2F0; }
           .cl-status-awaiting-approval { color: var(--cl-warning); border-color: #E3B65D; background: #FFF7E4; }
-          button, [data-testid="stFormSubmitButton"] button { min-height: 44px; border-radius: 10px !important; }
-          button[kind="primary"], [data-testid="stFormSubmitButton"] button { background: var(--cl-primary); border-color: #9CCB42; color: #20231B; font-weight: 750; }
-          button[kind="primary"]:hover, [data-testid="stFormSubmitButton"] button:hover { background: #C8FA6A; color: #20231B; }
+          button, [data-testid="stFormSubmitButton"] button, [data-testid="baseButton-secondary"] {
+              min-height: 44px;
+              border-radius: 10px !important;
+              font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+          }
+          button[kind="primary"], [data-testid="stFormSubmitButton"] button {
+              background: var(--cl-primary) !important;
+              border: 1.5px solid #9CCB42 !important;
+              color: #20231B !important;
+              font-weight: 800 !important;
+          }
+          button[kind="primary"]:hover, [data-testid="stFormSubmitButton"] button:hover {
+              background: #C8FA6A !important;
+              color: #20231B !important;
+          }
+
+          /* Secondary buttons (Refresh status, Propose NMAP/ZAP, Delete scope, etc.): Green background with white text */
+          button[kind="secondary"],
+          [data-testid="baseButton-secondary"],
+          .stButton > button:not([kind="primary"]) {
+              background-color: #1E3F20 !important;
+              border: 1.5px solid #4B8B3E !important;
+              color: #FFFFFF !important;
+              -webkit-text-fill-color: #FFFFFF !important;
+              font-weight: 700 !important;
+              font-size: 0.95rem !important;
+              box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+              transition: all 0.15s ease-in-out !important;
+          }
+          button[kind="secondary"] p,
+          button[kind="secondary"] span,
+          button[kind="secondary"] div,
+          [data-testid="baseButton-secondary"] p,
+          [data-testid="baseButton-secondary"] span,
+          .stButton > button:not([kind="primary"]) p,
+          .stButton > button:not([kind="primary"]) span {
+              color: #FFFFFF !important;
+              -webkit-text-fill-color: #FFFFFF !important;
+              font-weight: 700 !important;
+          }
+          button[kind="secondary"]:hover,
+          [data-testid="baseButton-secondary"]:hover,
+          .stButton > button:not([kind="primary"]):hover {
+              background-color: #2A592D !important;
+              border-color: #68B855 !important;
+              color: #FFFFFF !important;
+              -webkit-text-fill-color: #FFFFFF !important;
+              box-shadow: 0 0 10px rgba(104, 184, 85, 0.4) !important;
+          }
+          button[kind="secondary"]:active,
+          [data-testid="baseButton-secondary"]:active {
+              background-color: #163018 !important;
+              border-color: #3D7332 !important;
+          }
           input, textarea { border-radius: 10px !important; }
           :focus-visible { outline: 3px solid #547D11 !important; outline-offset: 2px !important; }
           @media (max-width: 700px) { [data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px; padding: 1rem; } .cl-hero-card { padding: 1.2rem; } .cl-hero-content { flex-basis: 76%; max-width: 76%; } }

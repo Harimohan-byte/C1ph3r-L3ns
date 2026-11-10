@@ -58,3 +58,18 @@ def test_rejected_scope_is_audited_and_approved_scope_persists(tmp_path: Path):
     assert [item.id for item in reopened.list_scopes()] == [scope.id]
     outcomes = [event.outcome for event in reopened.list_audit_events()]
     assert outcomes == ["approved", "rejected"]
+
+
+def test_delete_scope_cascades_and_removes_records(tmp_path: Path):
+    repository = Repository(tmp_path / "cipher.sqlite3")
+    scope = registered_scope(repository)
+    assert len(repository.list_scopes()) == 1
+
+    # Create associated scan run
+    repository.create_scan_run("run-1", scope.id, "nmap", "quick_recon", "done", "Initial scan")
+    assert len(repository.list_scan_runs(scope.id)) == 1
+
+    # Delete scope
+    repository.delete_scope(scope.id)
+    assert len(repository.list_scopes()) == 0
+    assert len(repository.list_scan_runs(scope.id)) == 0

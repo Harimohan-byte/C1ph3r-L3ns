@@ -21,7 +21,7 @@ from cipher_lens.adapters.zap import ZapAdapter
 from cipher_lens.adapters.nessus import NessusAdapter
 from cipher_lens.adapters.openvas import OpenVASAdapter
 from cipher_lens.config import data_directory
-from cipher_lens.domain.models import ActionClass, ProposalStatus
+from cipher_lens.domain.models import ActionClass, ProposalStatus, ResponseType
 from cipher_lens.domain.scope import normalize_target
 from cipher_lens.persistence.repositories import ApprovalSummary, Repository, ScanRunSummary
 from cipher_lens.services.findings import ingest_and_store_findings
@@ -103,7 +103,87 @@ def _approval_row(approval: ApprovalSummary) -> dict[str, str]:
 # AI proposal card renderer
 # ---------------------------------------------------------------------------
 def _render_proposal_outcome(outcome, source: str) -> None:
-    """Display the AI-generated proposal outcome card in a modular Bento card."""
+    """Display the AI-generated proposal outcome card in a modular Bento card or Advisory/Conversational card."""
+    agent_resp = getattr(outcome, "agent_response", None)
+
+    # 1. Conversational view
+    if agent_resp and agent_resp.response_type == ResponseType.CONVERSATIONAL and agent_resp.conversational:
+        msg = html.escape(agent_resp.conversational.message)
+        st.markdown(
+            f'<div class="cl-card" style="border-left: 4px solid #BBF351; background: #0C0F0C; padding: 1.25rem; border-radius: 8px;">'
+            f'<div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">'
+            f'<span style="font-size: 1.2rem;">🤖</span>'
+            f'<span style="color: #BBF351; font-family: \'JetBrains Mono\', monospace; font-weight: 700; font-size: 0.95rem;">Cipher-Lens Assistant</span>'
+            f'</div>'
+            f'<div style="color: #F7F3EB; font-size: 1rem; line-height: 1.5; margin: 0.5rem 0 0.75rem 0;">{msg}</div>'
+            f'<span class="cl-muted" style="font-size: 0.75rem; color: #5D7A42;">Conversational response · Source: {html.escape(source.upper())}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # 2. Advisory view
+    if agent_resp and agent_resp.response_type == ResponseType.ADVISORY and agent_resp.advisory:
+        adv = agent_resp.advisory
+        analysis_text = html.escape(adv.analysis)
+        ports_html = "".join(
+            f'<span style="background: #1A2612; border: 1px solid #3E5A22; color: #BBF351; font-family: \'JetBrains Mono\', monospace; font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.6rem; border-radius: 4px; margin-right: 0.4rem;">PORT {p}</span>'
+            for p in adv.relevant_ports
+        ) or '<span style="color: #8C997D; font-size: 0.85rem; font-style: italic;">No specific open ports identified yet</span>'
+
+        directional_html = ""
+        if adv.directional_guidance:
+            directional_text = html.escape(adv.directional_guidance)
+            directional_html = (
+                f'<div style="background: #141712; border-left: 3px solid #D4A373; border-radius: 4px; padding: 0.65rem 0.85rem; margin-top: 0.75rem;">'
+                f'<div style="color: #E8B98A; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem;">💡 Manual Testing & Follow-up Options (Directional)</div>'
+                f'<div style="color: #D9D2C5; font-size: 0.9rem; line-height: 1.4;">{directional_text}</div>'
+                f'<div style="color: #8C997D; font-size: 0.75rem; margin-top: 0.35rem; font-style: italic;">Note: General software context only — not a confirmed target finding. Directional guidance outside automated workflow.</div>'
+                f'</div>'
+            )
+
+        st.markdown(
+            f'<div class="cl-card" style="border: 1.5px solid #2D3D1E; background: #0C0F0C; border-radius: 10px; padding: 1.25rem;">'
+            f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">'
+            f'<div><span class="cl-kicker" style="color: #BBF351; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Strategic Assessment</span>'
+            f'<h4 style="margin: 0.2rem 0 0 0; color: #F7F3EB; font-weight: 800; font-size: 1.2rem;">Advisory Recommendations</h4></div>'
+            f'<span class="cl-status cl-status-done" style="background: #1A2E0F; color: #BBF351; border: 1px solid #3E5A22;">✓ Advisory Guidance</span>'
+            f'</div>'
+            f'<div style="background: #111511; border: 1px solid #1E2B16; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.85rem;">'
+            f'<span style="color: #7D9B5E; font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 0.35rem;">Topology & Analysis</span>'
+            f'<div style="color: #E2DDD5; font-size: 0.95rem; line-height: 1.45;">{analysis_text}</div>'
+            f'</div>'
+            f'<div style="margin-bottom: 0.85rem;">'
+            f'<span style="color: #7D9B5E; font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 0.4rem;">Relevant Discovered / Scope Ports</span>'
+            f'<div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">{ports_html}</div>'
+            f'</div>'
+            f'{directional_html}'
+            f'<div style="margin-top: 0.85rem; padding-top: 0.6rem; border-top: 1px solid #1A2414; display: flex; justify-content: space-between; align-items: center;">'
+            f'<span style="color: #5D7A42; font-size: 0.75rem;">Source: {html.escape(source.upper())} · Advisory does not write findings or alter state</span>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        if adv.recommended_tools:
+            st.write("")
+            st.markdown("<h5 style='color: #BBF351; font-family: monospace; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 0.5rem;'>⚡ Recommended Actions (One-Click Propose)</h5>", unsafe_allow_html=True)
+            for i, rec in enumerate(adv.recommended_tools):
+                col_info, col_btn = st.columns([3, 1])
+                with col_info:
+                    port_badge = f":{rec.port}" if rec.port else ""
+                    st.markdown(
+                        f"**{rec.tool.value.upper()}** `{rec.profile.value}` `{port_badge}` — *{rec.rationale}*"
+                    )
+                with col_btn:
+                    btn_label = f"▶ Propose {rec.tool.value.upper()}"
+                    if st.button(btn_label, key=f"adv_rec_btn_{i}", type="secondary"):
+                        port_str = f" on port {rec.port}" if rec.port else ""
+                        st.session_state["saved_assessment_objective"] = f"Run {rec.tool.value} ({rec.profile.value}){port_str}"
+                        st.rerun()
+        return
+
+    # 3. Standard scan proposal view (Bento card)
     p = outcome.proposal
     status_map = {
         ProposalStatus.APPROVED: ("cl-success-card", "✓ Approved — Ready to Execute"),
@@ -470,7 +550,7 @@ def render(repository: Repository) -> None:
             height=120,
             help="Your plain-language request. The AI grounds its next-step proposal in this, the scope, and prior evidence.",
         )
-        propose_btn = st.form_submit_button("Propose Next Assessment Step", type="primary")
+        propose_btn = st.form_submit_button("Chat With C1PH3R", type="primary")
 
     if propose_btn:
         if not analyst_request or not analyst_request.strip():
@@ -536,8 +616,19 @@ def render(repository: Repository) -> None:
                         break
 
         st.divider()
-        st.subheader("📋 Review AI Step Proposal")
-        st.caption("The AI has planned the step below. Review the target, tool, and rationale. No tool runs until you click Execute.")
+        is_conv = outcome.agent_response and outcome.agent_response.response_type == ResponseType.CONVERSATIONAL
+        is_adv = outcome.agent_response and outcome.agent_response.response_type == ResponseType.ADVISORY
+
+        if is_conv:
+            st.subheader("💬 AI Assistant Response")
+            st.caption("Conversational response from Cipher-Lens. No scan proposed or executed.")
+        elif is_adv:
+            st.subheader("🧭 Security Assessment Advisory")
+            st.caption("The AI provides strategic guidance based on registered scope and recon evidence. Select a recommended step below to propose a scan.")
+        else:
+            st.subheader("📋 Review AI Step Proposal")
+            st.caption("The AI has planned the step below. Review the target, tool, and rationale. No tool runs until you click Execute.")
+
         _render_proposal_outcome(outcome, getattr(outcome, "source", "ai"))
 
         is_executed = st.session_state.get("last_proposal_executed", False)
