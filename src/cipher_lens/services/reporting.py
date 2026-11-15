@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from reportlab.graphics.barcode.qr import QrCodeWidget
-from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.shapes import Drawing, Rect
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # --- Header Branding Dimensions & Tokens ---
 LOGO_HEIGHT_PT: float = 32.0
-LOGO_ASPECT_RATIO: float = 1657.0 / 1442.0  # ~1.149
+LOGO_ASPECT_RATIO: float = 1.149  # ~800/696 or 2206/1920
 LOGO_WIDTH_PT: float = round(LOGO_HEIGHT_PT * LOGO_ASPECT_RATIO, 2)  # 36.77 pt
 LOGO_X_PT: float = 0.6 * inch  # 43.2 pt
 LOGO_Y_PT: float = 742.0  # 792 - 18 - 32
@@ -39,6 +39,8 @@ RUNNING_TEXT_Y_PT: float = 748.0
 def _resolve_logo_path() -> Path | None:
     """Locate the Cipher-Lens application logo from project root or package assets."""
     candidates = [
+        Path.cwd() / "frontend" / "public" / "logo.png",
+        Path.cwd() / "Cipher-Lens-New-Logo.png",
         Path.cwd() / "Cipher-Lens-logo-1.png",
         Path(__file__).resolve().parent.parent / "ui" / "assets" / "Cipher-Lens-logo-1.png",
         Path(__file__).resolve().parents[3] / "Cipher-Lens-logo-1.png",
@@ -71,7 +73,7 @@ class NumberedCanvas(canvas.Canvas):
     def _draw_page_footer(self, total_pages: int) -> None:
         self.saveState()
         self.setFont("Helvetica", 8)
-        self.setFillColor(colors.HexColor("#4B5563"))
+        self.setFillColor(colors.HexColor("#8A86A3"))
 
         # Left side: Confidentiality notice
         self.drawString(LOGO_X_PT, 25.0, "CONFIDENTIAL · AUTHORIZED ASSESSMENT DISTRIBUTION ONLY")
@@ -81,7 +83,7 @@ class NumberedCanvas(canvas.Canvas):
         self.drawRightString(RUNNING_TEXT_X_PT, 25.0, page_str)
 
         # Subtle footer divider rule
-        self.setStrokeColor(colors.HexColor("#E5D7C0"))
+        self.setStrokeColor(colors.HexColor("#2E2548"))
         self.setLineWidth(0.5)
         self.line(LOGO_X_PT, 36.0, RUNNING_TEXT_X_PT, 36.0)
 
@@ -89,8 +91,12 @@ class NumberedCanvas(canvas.Canvas):
 
 
 def _draw_first_page(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> None:
-    """Canvas callback to decorate the first page header with the top-left Cipher-Lens logo."""
+    """Canvas callback to decorate the first page with obsidian background and Cipher-Lens logo."""
     page_canvas.saveState()
+    # Dark base background
+    page_canvas.setFillColor(colors.HexColor("#0F0D18"))
+    page_canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+
     logo_path = _resolve_logo_path()
     if logo_path is not None:
         try:
@@ -111,8 +117,12 @@ def _draw_first_page(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> None
 
 
 def _draw_later_pages(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> None:
-    """Canvas callback to decorate interior page headers with logo, running title, and divider rule."""
+    """Canvas callback to decorate interior pages with obsidian background, logo, running title, and divider rule."""
     page_canvas.saveState()
+    # Dark base background
+    page_canvas.setFillColor(colors.HexColor("#0F0D18"))
+    page_canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+
     logo_path = _resolve_logo_path()
     if logo_path is not None:
         try:
@@ -132,11 +142,11 @@ def _draw_later_pages(page_canvas: canvas.Canvas, doc: SimpleDocTemplate) -> Non
 
     # Running header text
     page_canvas.setFont("Helvetica-Bold", 8)
-    page_canvas.setFillColor(colors.HexColor("#516D18"))
+    page_canvas.setFillColor(colors.HexColor("#7D58FD"))
     page_canvas.drawRightString(RUNNING_TEXT_X_PT, RUNNING_TEXT_Y_PT, "CIPHER LENS · SECURITY ASSESSMENT REPORT")
 
     # Dividing rule separating header from content
-    page_canvas.setStrokeColor(colors.HexColor("#E5D7C0"))
+    page_canvas.setStrokeColor(colors.HexColor("#2E2548"))
     page_canvas.setLineWidth(0.5)
     page_canvas.line(LOGO_X_PT, RUNNING_RULE_Y_PT, RUNNING_TEXT_X_PT, RUNNING_RULE_Y_PT)
 
@@ -289,17 +299,17 @@ def build_report_context(repository: Repository, scope_id: str) -> dict[str, Any
 
 
 def _severity_hex(severity: str) -> str:
-    """Return standard hex color string for finding severity levels."""
+    """Return standard hex color string for finding severity levels matching dark brand palette."""
     sev = severity.lower()
     if sev == "critical":
-        return "#B42318"
+        return "#FF4D6D"
     if sev == "high":
-        return "#D9381E"
+        return "#FF4D6D"
     if sev == "medium":
-        return "#D97706"
+        return "#FFB454"
     if sev == "low":
-        return "#155EEF"
-    return "#4B5563"
+        return "#7D58FD"
+    return "#8A86A3"
 
 
 def _severity_color(severity: str) -> colors.Color:
@@ -333,14 +343,14 @@ def generate_vapt_pdf(
 
     styles = getSampleStyleSheet()
 
-    # Custom typography matching brand
+    # Custom typography matching dark brand
     title_style = ParagraphStyle(
         "DocTitle",
         parent=styles["Heading1"],
         fontName="Helvetica-Bold",
         fontSize=24,
         leading=28,
-        textColor=colors.HexColor("#064E56"),
+        textColor=colors.HexColor("#ECE9F7"),
     )
     subtitle_style = ParagraphStyle(
         "DocSub",
@@ -348,7 +358,7 @@ def generate_vapt_pdf(
         fontName="Helvetica-Bold",
         fontSize=10,
         leading=14,
-        textColor=colors.HexColor("#516D18"),
+        textColor=colors.HexColor("#30E1DB"),
         textTransform="uppercase",
     )
     h2_style = ParagraphStyle(
@@ -357,7 +367,7 @@ def generate_vapt_pdf(
         fontName="Helvetica-Bold",
         fontSize=14,
         leading=18,
-        textColor=colors.HexColor("#064E56"),
+        textColor=colors.HexColor("#7D58FD"),
         spaceBefore=14,
         spaceAfter=6,
     )
@@ -367,26 +377,27 @@ def generate_vapt_pdf(
         fontName="Helvetica",
         fontSize=9.5,
         leading=13.5,
-        textColor=colors.HexColor("#20231B"),
+        textColor=colors.HexColor("#ECE9F7"),
     )
     body_bold = ParagraphStyle(
         "BodyDarkBold",
         parent=body_style,
         fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#ECE9F7"),
     )
     callout_style = ParagraphStyle(
         "Callout",
         parent=body_style,
         fontSize=8.5,
         leading=12,
-        textColor=colors.HexColor("#4B5563"),
+        textColor=colors.HexColor("#8A86A3"),
     )
     code_style = ParagraphStyle(
         "CodeText",
         fontName="Courier",
         fontSize=8,
         leading=11,
-        textColor=colors.HexColor("#161616"),
+        textColor=colors.HexColor("#30E1DB"),
     )
 
     elements: list[Any] = []
@@ -400,11 +411,11 @@ def generate_vapt_pdf(
         parent=title_style,
         fontSize=24,
         leading=28,
-        textColor=colors.HexColor("#032E2B"),
+        textColor=colors.HexColor("#ECE9F7"),
     )
     elements.append(Paragraph("Vulnerability Assessment &amp;<br/>Penetration Testing Report", cover_title_style))
     elements.append(Spacer(1, 8))
-    elements.append(HRFlowable(width="100%", thickness=2.5, color=colors.HexColor("#BBF351"), spaceAfter=14))
+    elements.append(HRFlowable(width="100%", thickness=2.5, color=colors.HexColor("#7D58FD"), spaceAfter=14))
 
     cover_meta_data = [
         [
@@ -429,13 +440,13 @@ def generate_vapt_pdf(
         ],
         [
             Paragraph("<b>Security Classification:</b>", body_style),
-            Paragraph("<font color='#B42318'><b>CONFIDENTIAL · AUTHORIZED STAKEHOLDERS ONLY</b></font>", body_style),
+            Paragraph("<font color='#FF4D6D'><b>CONFIDENTIAL · AUTHORIZED STAKEHOLDERS ONLY</b></font>", body_style),
         ],
     ]
     cover_table = Table(cover_meta_data, colWidths=[2.2 * inch, 4.8 * inch])
     cover_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#171324")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
@@ -474,16 +485,16 @@ def generate_vapt_pdf(
             Paragraph("<b>Primary Target</b>", callout_style),
         ],
         [
-            Paragraph(f"<font size='15' color='#032E2B'><b>{total_findings}</b></font>", body_style),
-            Paragraph(f"<font size='15' color='{'#B42318' if crit_high else '#355B00'}'><b>{crit_high}</b></font>", body_style),
-            Paragraph(f"<font size='15' color='#516D18'><b>{unique_assets}</b></font>", body_style),
-            Paragraph(f"<font size='10' color='#032E2B'><code>{html.escape(tested_target)}</code></font>", body_style),
+            Paragraph(f"<font size='15' color='#ECE9F7'><b>{total_findings}</b></font>", body_style),
+            Paragraph(f"<font size='15' color='{'#FF4D6D' if crit_high else '#30E1DB'}'><b>{crit_high}</b></font>", body_style),
+            Paragraph(f"<font size='15' color='#7D58FD'><b>{unique_assets}</b></font>", body_style),
+            Paragraph(f"<font size='10' color='#30E1DB'><code>{html.escape(tested_target)}</code></font>", body_style),
         ],
     ]
     metric_table = Table(metric_data, colWidths=[1.75 * inch] * 4)
     metric_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#171324")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -527,9 +538,9 @@ def generate_vapt_pdf(
             ])
         top_table = Table(top_rows, colWidths=[0.35 * inch, 2.75 * inch, 1.0 * inch, 1.0 * inch, 1.9 * inch])
         top_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
-            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFFDF8")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
             ("ALIGN", (0, 0), (0, -1), "CENTER"),
             ("ALIGN", (2, 0), (3, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -579,13 +590,13 @@ def generate_vapt_pdf(
 
             tool_label = html.escape(r.tool.upper())
             if total_attempts > 1:
-                tool_label += f"<br/><font color='#516D18' size='7.5'><b>Attempt {attempt_idx}</b></font>"
+                tool_label += f"<br/><font color='#30E1DB' size='7.5'><b>Attempt {attempt_idx}</b></font>"
 
             prof_text = html.escape(r.profile or "default")
             timing_text = ""
             if r.started_at:
                 start_clean = r.started_at[:19].replace("T", " ")
-                timing_text = f"<br/><font color='#423E32' size='7'>{html.escape(start_clean)}"
+                timing_text = f"<br/><font color='#8A86A3' size='7'>{html.escape(start_clean)}"
                 if r.completed_at:
                     try:
                         t0 = datetime.fromisoformat(r.started_at.replace("Z", "+00:00"))
@@ -602,17 +613,17 @@ def generate_vapt_pdf(
 
             st_upper = r.status.upper()
             if st_upper == "DONE":
-                st_badge = "<font color='#355B00'><b>[DONE]</b></font>"
+                st_badge = "<font color='#30E1DB'><b>[DONE]</b></font>"
             elif st_upper in {"FAILED", "BLOCKED"}:
-                st_badge = f"<font color='#B42318'><b>[{st_upper}]</b></font>"
+                st_badge = f"<font color='#FF4D6D'><b>[{st_upper}]</b></font>"
             elif st_upper in {"RUNNING", "PARSING"}:
-                st_badge = f"<font color='#155EEF'><b>[{st_upper}]</b></font>"
+                st_badge = f"<font color='#7D58FD'><b>[{st_upper}]</b></font>"
             else:
-                st_badge = f"<font color='#8A5700'><b>[{st_upper}]</b></font>"
+                st_badge = f"<font color='#FFB454'><b>[{st_upper}]</b></font>"
 
             notes = html.escape(r.rationale or "Standard execution.")
             if r.error_message:
-                notes += f"<br/><font color='#B42318'><b>Failure:</b> {html.escape(r.error_message)}</font>"
+                notes += f"<br/><font color='#FF4D6D'><b>Failure:</b> {html.escape(r.error_message)}</font>"
 
             run_table_data.append([
                 Paragraph(tool_label, code_style),
@@ -623,10 +634,11 @@ def generate_vapt_pdf(
 
         run_table = Table(run_table_data, colWidths=[1.1 * inch, 1.4 * inch, 1.1 * inch, 3.4 * inch])
         run_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
@@ -646,20 +658,21 @@ def generate_vapt_pdf(
             Paragraph("<b>Total</b>", body_bold),
         ],
         [
-            Paragraph(f"<font color='#B42318'><b>{distribution['Critical']}</b></font>", body_bold),
-            Paragraph(f"<font color='#D9381E'><b>{distribution['High']}</b></font>", body_bold),
-            Paragraph(f"<font color='#D97706'><b>{distribution['Medium']}</b></font>", body_bold),
-            Paragraph(f"<font color='#155EEF'><b>{distribution['Low']}</b></font>", body_bold),
-            Paragraph(f"<font color='#4B5563'><b>{distribution['Info']}</b></font>", body_bold),
+            Paragraph(f"<font color='#FF4D6D'><b>{distribution['Critical']}</b></font>", body_bold),
+            Paragraph(f"<font color='#FF4D6D'><b>{distribution['High']}</b></font>", body_bold),
+            Paragraph(f"<font color='#FFB454'><b>{distribution['Medium']}</b></font>", body_bold),
+            Paragraph(f"<font color='#7D58FD'><b>{distribution['Low']}</b></font>", body_bold),
+            Paragraph(f"<font color='#8A86A3'><b>{distribution['Info']}</b></font>", body_bold),
             Paragraph(f"<b>{len(findings)}</b>", body_bold),
         ],
     ]
     dist_table = Table(dist_data, colWidths=[1.1 * inch] * 5 + [1.5 * inch])
     dist_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
@@ -683,9 +696,9 @@ def generate_vapt_pdf(
     ]
     how_to_read_table = Table(how_to_read_data, colWidths=[7.0 * inch])
     how_to_read_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
-        ("LINELEFT", (0, 0), (0, -1), 3.0, colors.HexColor("#516D18")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#171324")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
+        ("LINELEFT", (0, 0), (0, -1), 3.0, colors.HexColor("#7D58FD")),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
@@ -737,10 +750,10 @@ def generate_vapt_pdf(
                 if gf.cwe_name:
                     cwe_tok += f" ({html.escape(gf.cwe_name)})"
                 if gf.owasp_category:
-                    cwe_tok += f" · <font color='#516D18'><b>{html.escape(gf.owasp_category)}</b></font>"
+                    cwe_tok += f" · <font color='#30E1DB'><b>{html.escape(gf.owasp_category)}</b></font>"
                 meta_tokens.append(cwe_tok)
             if gf.cvss is None and not gf.cve and not gf.cwe:
-                meta_tokens.append("<font color='#4B5563'>Native tool observation</font>")
+                meta_tokens.append("<font color='#8A86A3'>Native tool observation</font>")
             meta_line = " · ".join(meta_tokens)
 
             finding_header = f"{idx}. {sev_badge} {html.escape(gf.canonical_title)}"
@@ -783,9 +796,9 @@ def generate_vapt_pdf(
 
             card_table = Table([[card_inner]], colWidths=[7.0 * inch])
             card_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF8")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#171324")),
                 ("LINELEFT", (0, 0), (0, -1), 3.5, _severity_color(gf.severity.value)),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 8),
@@ -806,19 +819,19 @@ def generate_vapt_pdf(
             Paragraph("<b>Effort</b>", body_bold),
         ],
         [
-            Paragraph("<font color='#B42318'><b>P1 · Immediate</b></font><br/><font size='7' color='#423E32'>Within 24–48 hours</font>", body_style),
+            Paragraph("<font color='#FF4D6D'><b>P1 · Immediate</b></font><br/><font size='7' color='#8A86A3'>Within 24–48 hours</font>", body_style),
             Paragraph("Apply official vendor security patches; deploy WAF virtual patching rules; restrict exposed administrative interfaces.", body_style),
             Paragraph("Critical and High severity vulnerabilities (SQLi, RCE, default credentials, exposed unauthenticated services).", body_style),
             Paragraph("<b>Medium</b>", body_style),
         ],
         [
-            Paragraph("<font color='#D97706'><b>P2 · Short-Term</b></font><br/><font size='7' color='#423E32'>Within 1–2 weeks</font>", body_style),
+            Paragraph("<font color='#FFB454'><b>P2 · Short-Term</b></font><br/><font size='7' color='#8A86A3'>Within 1–2 weeks</font>", body_style),
             Paragraph("Implement standard defensive HTTP response headers (CSP, X-Frame-Options, HSTS); sanitize user inputs; disable debug pages.", body_style),
             Paragraph("Medium severity issues (XSS, Clickjacking, Information Disclosure, CORS misconfigurations).", body_style),
             Paragraph("<b>Low</b>", body_style),
         ],
         [
-            Paragraph("<font color='#516D18'><b>P3 · Maintenance</b></font><br/><font size='7' color='#423E32'>Ongoing cycle</font>", body_style),
+            Paragraph("<font color='#30E1DB'><b>P3 · Maintenance</b></font><br/><font size='7' color='#8A86A3'>Ongoing cycle</font>", body_style),
             Paragraph("Enforce network ingress filtering; close unused ports; suppress verbose server banners; establish continuous scanning schedule.", body_style),
             Paragraph("Low and Informational observations (unneeded services, banner leaks, missing hardening flags).", body_style),
             Paragraph("<b>Low</b>", body_style),
@@ -826,9 +839,9 @@ def generate_vapt_pdf(
     ]
     roadmap_table = Table(roadmap_data, colWidths=[1.3 * inch, 2.5 * inch, 2.4 * inch, 0.8 * inch])
     roadmap_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFFDF8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
@@ -890,11 +903,11 @@ def generate_vapt_pdf(
 
             st_upper = a.status.upper()
             if st_upper == "APPROVED":
-                st_badge = "<font color='#355B00'><b>[APPROVED]</b></font>"
+                st_badge = "<font color='#30E1DB'><b>[APPROVED]</b></font>"
             elif st_upper == "REJECTED":
-                st_badge = "<font color='#B42318'><b>[REJECTED]</b></font>"
+                st_badge = "<font color='#FF4D6D'><b>[REJECTED]</b></font>"
             else:
-                st_badge = f"<font color='#8A5700'><b>[{st_upper}]</b></font>"
+                st_badge = f"<font color='#FFB454'><b>[{st_upper}]</b></font>"
 
             target_str = html.escape(f"{a.target}:{a.port}" if a.port else (a.target or "scope"))
             action_str = html.escape(a.action.replace("_", " ").upper())
@@ -914,10 +927,11 @@ def generate_vapt_pdf(
 
         app_table = Table(app_rows, colWidths=[1.4 * inch, 1.2 * inch, 1.1 * inch, 3.3 * inch])
         app_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
@@ -957,9 +971,9 @@ def generate_vapt_pdf(
 
         reg_table = Table(reg_rows, colWidths=[0.7 * inch, 1.0 * inch, 1.8 * inch, 3.5 * inch])
         reg_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F7F3EB")),
-            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFFDF8")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F1A30")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#171324")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (0, 0), (0, -1), "CENTER"),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -972,24 +986,28 @@ def generate_vapt_pdf(
     # --- Appendix B: Integrity Seal ---
     elements.append(Paragraph("Appendix B: Report Integrity Seal &amp; Cryptographic Attestation", h2_style))
     qr_data = f"CIPHER_LENS|ID:{scope.id[:8]}|TARGET:{scope.canonical_target}|DATE:{generated_at}"
+    d = Drawing(71, 71)
+    d.add(Rect(0, 0, 71, 71, rx=4, ry=4, fillColor=colors.HexColor("#ECE9F7"), strokeColor=colors.HexColor("#7D58FD"), strokeWidth=1))
     qr = QrCodeWidget(qr_data)
-    qr.barWidth = 65
-    qr.barHeight = 65
-    d = Drawing(65, 65)
+    qr.barWidth = 63
+    qr.barHeight = 63
+    qr.x = 4
+    qr.y = 4
+    qr.barFillColor = colors.HexColor("#0F0D18")
     d.add(qr)
 
     seal_details = (
         f"<b>CIPHER LENS FORENSIC INTEGRITY SEAL</b><br/>"
         f"<b>Assessment ID:</b> <code>{html.escape(scope.id)}</code><br/>"
         f"<b>Generated:</b> {html.escape(generated_at)}<br/>"
-        f"<b>Cryptographic Status:</b> <font color='#355B00'><b>VERIFIED IMMUTABLE AUDIT TRAIL</b></font><br/>"
-        f"<font size='7.5' color='#423E32'>Scan with any standard QR scanner or pipeline to validate report authenticity against persisted assessment records.</font>"
+        f"<b>Cryptographic Status:</b> <font color='#30E1DB'><b>VERIFIED IMMUTABLE AUDIT TRAIL</b></font><br/>"
+        f"<font size='7.5' color='#8A86A3'>Scan with any standard QR scanner or pipeline to validate report authenticity against persisted assessment records.</font>"
     )
     seal_table = Table([[d, Paragraph(seal_details, body_style)]], colWidths=[1.1 * inch, 5.9 * inch])
     seal_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5D7C0")),
-        ("LINELEFT", (0, 0), (0, -1), 3.0, colors.HexColor("#BBF351")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#171324")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2E2548")),
+        ("LINELEFT", (0, 0), (0, -1), 3.0, colors.HexColor("#30E1DB")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
@@ -997,6 +1015,15 @@ def generate_vapt_pdf(
         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
     elements.append(seal_table)
+
+    doc.build(elements, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages, canvasmaker=NumberedCanvas)
+    pdf_bytes = buffer.getvalue()
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(pdf_bytes)
+
+    return pdf_bytes
 
     doc.build(elements, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages, canvasmaker=NumberedCanvas)
     pdf_bytes = buffer.getvalue()

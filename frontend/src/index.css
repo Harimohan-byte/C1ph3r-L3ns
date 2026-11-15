@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cl-bg: #0F0D18;
+  --cl-card: #171324;
+  --cl-hover: #1F1A30;
+  --cl-violet: #7D58FD;
+  --cl-cyan: #30E1DB;
+  --cl-text: #ECE9F7;
+  --cl-muted: #8A86A3;
+  --cl-danger: #FF4D6D;
+  --cl-warning: #FFB454;
+}
+
+body {
+  background-color: #0F0D18;
+  color: #ECE9F7;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom Cyber Glass Card */
+.glass-panel {
+  background: rgba(23, 19, 36, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(125, 88, 253, 0.18);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-panel:hover {
+  border-color: rgba(125, 88, 253, 0.35);
+  box-shadow: 0 8px 32px 0 rgba(125, 88, 253, 0.12);
+}
+
+/* Floating Top Navigation Pill */
+.nav-glass-pill {
+  background: rgba(15, 13, 24, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(125, 88, 253, 0.22);
+  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.7), 0 0 16px rgba(125, 88, 253, 0.15);
+}
+
+/* Subtle Perspective Grid (Landing-page motif) */
+.cyber-grid-floor {
+  background-image: 
+    linear-gradient(to right, rgba(125, 88, 253, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(125, 88, 253, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center 20%, black 20%, transparent 75%);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F0D18;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(125, 88, 253, 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(125, 88, 253, 0.5);
+}
+

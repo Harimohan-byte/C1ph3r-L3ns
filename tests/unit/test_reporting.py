@@ -173,7 +173,7 @@ def test_resolve_logo_path():
     logo_path = _resolve_logo_path()
     assert logo_path is not None
     assert logo_path.is_file()
-    assert logo_path.name == "Cipher-Lens-logo-1.png"
+    assert logo_path.name in {"logo.png", "Cipher-Lens-New-Logo.png", "Cipher-Lens-logo-1.png"}
 
 
 def test_pdf_report_draws_logo_on_all_pages(test_repo: Repository, populated_scope):
@@ -186,7 +186,7 @@ def test_pdf_report_draws_logo_on_all_pages(test_repo: Repository, populated_sco
     orig_drawImage = Canvas.drawImage
 
     def tracked_drawImage(self, image, x, y, width=None, height=None, **kwargs):
-        if "Cipher-Lens-logo-1.png" in str(image):
+        if any(logo_name in str(image) for logo_name in ["logo.png", "Cipher-Lens-New-Logo.png", "Cipher-Lens-logo-1.png"]):
             draw_calls.append({"x": x, "y": y, "width": width, "height": height})
         return orig_drawImage(self, image, x, y, width=width, height=height, **kwargs)
 
