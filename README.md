@@ -6,9 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Governance](https://img.shields.io/badge/safety-human--in--the--loop-orange.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
 [![Tool Orchestration](https://img.shields.io/badge/scanners-5%20tools%20orchestrated-516D18.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
-[![UI Framework](https://img.shields.io/badge/interface-Streamlit%20mono-neon.svg)](https://streamlit.io/)
-
-▶ **[Watch the full demonstration](https://drive.google.com/file/d/1rc4uzncuTmGNHrDTMJ7p6fQb7KIwuq63/view?usp=sharing)**
+[![UI Framework](https://img.shields.io/badge/interface-Dark%20Cyberpunk%20Glass-7D58FD.svg)](https://github.com/Harimohan-byte/C1ph3r-L3ns)
 
 ---
 
@@ -43,15 +41,13 @@
 
 ## ◈ Overview
 
-**CIPHER LENS** is a local-first, conversational AI agent engineered for authorized Vulnerability Assessment and Penetration Testing (VAPT). Rather than executing a rigid, unthinking scan sequence, Cipher-Lens dynamically analyzes discovered network services and web endpoints to propose adaptive, context-aware assessment steps.
+**CIPHER LENS** is an autonomous, **conversational AI VAPT security assistant (Cyphy)** engineered for authorized Vulnerability Assessment and Penetration Testing. Rebuilt with a sleek, dark cyberpunk glass interface, Cipher-Lens transforms natural language security queries into scoped assessment proposals, automated tool dispatches, and live finding correlations—keeping a human security expert firmly in control of every offensive decision.
 
-In traditional security assessments, analysts often spend more time juggling disparate tools, cross-referencing siloed outputs across Nmap, Nikto, OWASP ZAP, Nessus, and OpenVAS, and deduplicating repetitive alerts than analyzing actionable business risk. Manual penetration testing remains expertise-gated, labor-intensive, and prone to human variance across team members. Cipher-Lens solves this by unifying disparate discovery and vulnerability tools into a single conversational, adaptive, and cryptographically auditable workflow—keeping a human expert firmly in control of every high-risk decision.
-
-Every active or intrusive action is strictly governed by a mandatory **human-in-the-loop approval gate**, enforced within registered scope boundaries, and permanently recorded in an immutable cryptographic audit log. The final output is an executive, evidence-backed VAPT PDF report complete with cryptographic SHA-256 artifact verification and a forensic QR integrity seal.
+Every active action is strictly governed by a mandatory **human-in-the-loop approval gate**, bounded by attested scope limits, and permanently logged in an immutable cryptographic audit ledger. The final deliverable is an executive, client-ready VAPT PDF report featuring SHA-256 evidence verification and a forensic QR integrity seal.
 
 <div align="center">
-  <img src="assets/registration_flow.gif" alt="Cipher-Lens Scope Registration & Adaptive Workflow" width="850">
-  <p><em>Real-time registration of authorized lab boundaries, attestation verification, and adaptive AI proposal orchestration.</em></p>
+  <img src="assets/registration_flow.gif" alt="Cipher-Lens Conversational AI VAPT Assistant" width="850">
+  <p><em>Autonomous conversational VAPT intelligence (Cyphy) — dark cyberpunk glass interface, real-time scope gating, and native scanner orchestration.</em></p>
 </div>
 
 ---
@@ -157,7 +153,7 @@ The analyst specifies an objective or requests a proposal. The AI evaluates curr
 Active validation requests (such as ZAP active scans) remain blocked until an authorized analyst inspects the request, enters their identity and justification, and grants an approval token valid for 15 minutes.
 
 <div align="center">
-  <img src="assets/approval_audit_flow.gif" alt="Human Approval and Searchable Audit Trail" width="800">
+  <img src="assets/approval_audit_flow.png" alt="Human Approval and Searchable Audit Trail" width="800">
 </div>
 
 ### Step 4: Evidence Ingestion & Cryptographic Verification
@@ -178,6 +174,10 @@ Findings across tools and endpoints are consolidated into single root causes, en
 
 ### Step 6: One-Click VAPT PDF Report Generation
 Generate an executive, client-ready PDF report featuring executive metrics, prioritized remediation roadmaps, recorded human approvals, and an immutable evidence register.
+
+<div align="center">
+  <img src="assets/vapt_report.png" alt="Executive VAPT Posture Report & PDF Export" width="800">
+</div>
 
 ---
 

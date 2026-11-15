@@ -40,8 +40,10 @@ SECREF/
 .specify/
 # Media source files (curated assets reside in assets/)
 *.mp4
+*.mp3
 *.pptx
 *.ass
+Video/
 Registeration.png
 Nmap.png
 1.png
