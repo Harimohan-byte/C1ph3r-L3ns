@@ -159,15 +159,6 @@ Active validation requests (such as ZAP active scans) remain blocked until an au
 ### Step 4: Evidence Ingestion & Cryptographic Verification
 Scanners run in non-shell subprocesses or REST API sessions. Raw outputs (XML, JSON) are hashed with SHA-256 prior to persistence, ensuring an unalterable chain of custody.
 
-<div align="center">
-  <img src="assets/nessus_ingestion.gif" alt="Nessus Vulnerability Report Ingestion" width="800">
-  <p><em>Import-only Nessus XML report ingestion and SHA-256 evidence hashing at 1.5x speed.</em></p>
-</div>
-
-<div align="center">
-  <img src="assets/openvas_ingestion.gif" alt="OpenVAS GMP XML Report Ingestion" width="800">
-  <p><em>Import-only GMP XML ingestion and cross-tool correlation from OpenVAS / Greenbone at 1.5x speed.</em></p>
-</div>
 
 ### Step 5: Correlation, Enrichment & Prioritization
 Findings across tools and endpoints are consolidated into single root causes, enriched with CWE definitions and OWASP Top 10 categories, and scored using a deterministic formula (0.0 to 10.0).
