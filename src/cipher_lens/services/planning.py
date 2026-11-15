@@ -214,6 +214,10 @@ def _seven_tools_prompt_catalog() -> str:
 
 def _messages(context: ProposalContext) -> list[dict[str, str]]:
     system = (
+        "IDENTITY & PERSONA:\n"
+        "You are C1PH3R L3NS (also known as 'Cyphy') — an elite, autonomous VAPT security assistant designed to operate strictly on authorized lab targets under human supervision.\n"
+        "Whenever the analyst asks 'Who are you?', 'Who am I talking to?', or asks about your identity, name, or persona, you must respond in 'conversational' mode with a cool, punchy 2-3 liner:\n"
+        "'Hi! I am C1PH3R L3NS (Cipher-Lens) — your autonomous VAPT security assistant, but you can call me Cyphy! 🛡️⚡\n\nI monitor defensive perimeters, correlate multi-scanner intelligence, and draft precision assessment blueprints under strict human governance. How can I assist your security audit today?'\n\n"
         "You are an expert, authorized VAPT security planner for authorized lab targets.\n"
         "Analyze the analyst request, scope, and discovered evidence to provide the appropriate response.\n\n"
         "Security Tool Catalog & Truthful Integration Statuses:\n"
@@ -236,7 +240,7 @@ def _messages(context: ProposalContext) -> list[dict[str, str]]:
         "   - 'directional_guidance' may optionally mention manual outside-the-workflow tools (Burp Suite, Metasploit) in a purely directional manner (e.g., 'version documented with historical RCE issues — worth manual validation via Metasploit outside this workflow').\n"
         "   - NEVER include exploit payloads, attack code, module names, or how-to exploitation steps.\n"
         "   - NEVER assert specific CVEs or CVSS scores in advisory mode; present background knowledge as general software context, never as a confirmed finding on this target.\n\n"
-        "3. 'conversational': Use for simple greetings, persona inquiries, or non-task small talk (e.g. 'hi', 'who are you').\n"
+        "3. 'conversational': Use for greetings, persona inquiries, or non-task inquiries (e.g. 'hi', 'who are you', 'who am i talking to').\n"
         "   Schema: {\"response_type\":\"conversational\",\"conversational\":{\"message\":\"short in-character reply\"}}\n\n"
         "Output raw JSON only with no markdown fences."
     )
@@ -355,14 +359,32 @@ def deterministic_fallback(context: ProposalContext) -> AgentResponse:
     ev = context.evidence_summary.lower()
 
     # 1. Conversational intent (greetings / identity / small talk)
-    greetings = {"hi", "hello", "hey", "who are you", "who are u", "what are you", "help", "good morning", "good evening"}
-    if any(req == g or req.startswith(f"{g} ") or req.startswith(f"{g},") for g in greetings):
+    identity_phrases = {
+        "who are you", "who are u", "what are you", "who am i talking to", "who am i speaking to",
+        "who r u", "tell me about yourself", "identify yourself", "whats your name", "what is your name",
+        "who r you", "who am i talkin to", "who am i talkin 2"
+    }
+    greetings = {"hi", "hello", "hey", "help", "good morning", "good evening", "howdy", "sup"}
+
+    is_identity = any(p in req for p in identity_phrases)
+    is_greeting = any(req == g or req.startswith(f"{g} ") or req.startswith(f"{g},") or req.startswith(f"{g}!") for g in greetings)
+
+    if is_identity:
         return AgentResponse(
             response_type=ResponseType.CONVERSATIONAL,
             conversational=ConversationalPayload(
-                message="Hello! I am Cipher-Lens, your human-supervised VAPT security agent. "
-                        "I can propose targeted scans, offer advisory recommendations based on discovered evidence, "
-                        "or guide your assessment. How can I assist with this target today?"
+                message="Hi! I am C1PH3R L3NS (Cipher-Lens) — your autonomous VAPT security assistant, but you can call me Cyphy! 🛡️⚡\n\n"
+                        "I monitor defensive perimeters, correlate multi-scanner intelligence, and draft precision assessment blueprints under strict human governance. How can I assist your security audit today?"
+            ),
+        )
+
+    if is_greeting:
+        return AgentResponse(
+            response_type=ResponseType.CONVERSATIONAL,
+            conversational=ConversationalPayload(
+                message="Hello! I am C1PH3R L3NS (Cipher-Lens) — your autonomous VAPT security assistant, but you can call me Cyphy! 🛡️⚡\n\n"
+                        "I can propose targeted scans, offer strategic threat advisory, "
+                        "or guide your assessment within authorized boundaries. What's our next objective?"
             ),
         )
 
