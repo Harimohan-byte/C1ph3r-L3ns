@@ -10,6 +10,7 @@ interface PromptBarProps {
 }
 
 const STARTER_PROMPTS = [
+  { label: 'Who are you?', text: 'Who are you?', icon: Sparkles },
   { label: 'Initial Port Discovery', text: 'Perform initial port and service discovery on the target application.', icon: Terminal },
   { label: 'Web VAPT Guidance', text: 'What is our strategic security assessment methodology for this target?', icon: Compass },
   { label: 'Check Critical CVEs', text: 'Analyze web server configurations and probe for known high-severity vulnerabilities.', icon: ShieldAlert },
