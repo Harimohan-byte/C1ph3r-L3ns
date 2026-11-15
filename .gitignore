@@ -6,6 +6,7 @@
 # Dependency and build output
 node_modules/
 dist/
+!frontend/dist/
 build/
 .venv/
 .python-packages/
@@ -47,3 +48,6 @@ Nmap.png
 Page-1.png
 *.pdf
 TECHNICAL-DEEP-DIVE.md
+Documentations/
+Cipher-Lens-New-Logo.png
+Landing-page.jpg
